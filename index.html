@@ -78,7 +78,7 @@ async function createStore(init) {
 // ---------- constants ----------
 const DAYS = ["Pon", "Uto", "Sri", "Čet", "Pet", "Sub", "Ned"];
 const DAYS_LONG = ["Ponedjeljak", "Utorak", "Srijeda", "Četvrtak", "Petak", "Subota", "Nedjelja"];
-const ADMINS = ["Robert", "Vedrana"];
+const ADMINS = ["Robert"];
 const ROLES = [
   { id: "stalni", label: "stalni", plural: "Stalni", leave: 20 },
   { id: "student", label: "student", plural: "Studenti", leave: null },
@@ -129,12 +129,20 @@ const FERIJE = [
   ["2026-06-15", "2026-09-06"], ["2026-12-24", "2027-01-06"],
 ];
 
+// id-jevi ostaju isti kao u prošloj verziji (p0 je bila Vedrana), da se već upisani podaci ne pomiješaju
 const DEFAULT_ROSTER = [
-  ["Vedrana", "stalni"], ["Inoslav", "stalni"], ["Terra", "stalni"],
+  ["Inoslav", "stalni"], ["Terra", "stalni"],
   ["Nives", "student"], ["Hana", "student"], ["Nikol", "student"], ["Viktorija", "student"], ["Lucija", "student"], ["Ena", "student"], ["Boris", "student"],
-].map(([name, role], i) => ({ id: "p" + i, name, role, phone: "", email: "", sanIssued: "", sanExpiry: "" }));
-// stari tim koji je aplikacija prije stavljala sama; takav spremljeni tim zamijeni novim
+].map(([name, role], i) => ({ id: "p" + (i + 1), name, role, phone: "", email: "", sanIssued: "", sanExpiry: "" }));
+// timovi koje je aplikacija prije stavljala sama; takav spremljeni tim zamijeni novim
 const OLD_DEFAULT_NAMES = "Vedrana,Jana,Inoslav,Patricija,Terra,Ivan,Agneza,Nives,Ena,Jelena,Roko,Lucija";
+const PREV_DEFAULT_NAMES = "Vedrana,Inoslav,Terra,Nives,Hana,Nikol,Viktorija,Lucija,Ena,Boris";
+function fixRoster(pr) {
+  const names = pr.map((x) => x.name).join(",");
+  if (names === OLD_DEFAULT_NAMES) return DEFAULT_ROSTER;
+  if (names === PREV_DEFAULT_NAMES) return pr.filter((x) => x.name !== "Vedrana");
+  return pr;
+}
 
 // ---------- date helpers (local time) ----------
 function key(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
@@ -227,9 +235,8 @@ function App() {
     await refreshDB();
     const [r, w, n, l, s, pin] = await Promise.all([sGet("roster"), sGet(`week:${weekKey}`), sGet(`notes:${weekKey}`), sGet("leave"), sGet("swaps"), sGet("pins")]);
     if (pin) { try { setPins(JSON.parse(pin)); } catch {} }
-    if (r) { try { const pr = JSON.parse(r); if (pr.map((x) => x.name).join(",") === OLD_DEFAULT_NAMES) { setRoster(DEFAULT_ROSTER); await sSet("roster", JSON.stringify(DEFAULT_ROSTER)); } else setRoster(pr); } catch {} } else if (!silent) await sSet("roster", JSON.stringify(DEFAULT_ROSTER));
-    let ro = DEFAULT_ROSTER; try { if (r) ro = JSON.parse(r); } catch (e) {}
-    if (ro.map((x) => x.name).join(",") === OLD_DEFAULT_NAMES) ro = DEFAULT_ROSTER;
+    let ro = DEFAULT_ROSTER;
+    if (r) { try { const pr = JSON.parse(r); ro = fixRoster(pr); setRoster(ro); if (ro !== pr) await sSet("roster", JSON.stringify(ro)); } catch {} } else if (!silent) await sSet("roster", JSON.stringify(DEFAULT_ROSTER));
     setWeek(weekFrom(w, weekKey, ro));
     if (!notesFocused.current) setNotes(n || "");
     if (l) { try { setLeave(JSON.parse(l)); } catch {} }
@@ -473,7 +480,7 @@ function App() {
 
         {!canEdit && tab !== "zamjene" && tab !== "upute" && tab !== "kasa" && tab !== "sati" && (
           <div className="bg-amber-50 border-b border-amber-200 text-amber-800 text-[12px] px-4 py-2">
-            Pregled — raspored uređuju Robert i Vedrana. Zamjene smjena možeš tražiti i potvrđivati sam.
+            Pregled — raspored uređuje Robert. Zamjene smjena možeš tražiti i potvrđivati sam.
           </div>
         )}
 
@@ -645,8 +652,8 @@ function App() {
           ) : (
             // UPUTE
             <div className="px-4 py-4 space-y-4 pb-40 text-sm leading-relaxed">
-              <Section title="PIN">Svatko ima svoj PIN. Prvi put kad odabereš svoje ime, postaviš PIN (min. 4 znamenke); idući put ga upisuješ za ulaz. Tako se prijava i potvrda zamjena vežu na stvarnu osobu. Ako netko zaboravi PIN, Robert ili Vedrana ga resetiraju u tabu Tim (osoba postavi novi pri sljedećem ulazu). Napomena: PIN je interna brava za tim, ne i jaka lozinka.</Section>
-              <Section title="Admini">Raspored, godišnji i članove tima uređuju <b>Robert</b> i <b>Vedrana</b>. Ostali vide raspored i mogu pisati napomene te tražiti/potvrđivati zamjene.</Section>
+              <Section title="PIN">Svatko ima svoj PIN. Prvi put kad odabereš svoje ime, postaviš PIN (min. 4 znamenke); idući put ga upisuješ za ulaz. Tako se prijava i potvrda zamjena vežu na stvarnu osobu. Ako netko zaboravi PIN, Robert ga resetira u tabu Tim (osoba postavi novi pri sljedećem ulazu). Napomena: PIN je interna brava za tim, ne i jaka lozinka.</Section>
+              <Section title="Admini">Raspored, godišnji i članove tima uređuje <b>Robert</b>. Ostali vide raspored i mogu pisati napomene te tražiti/potvrđivati zamjene.</Section>
               <Section title="Kako se koristi">
                 <b>Raspored</b> — tablica kao papirnati raspored: dani u stupcima, termini (11–16h, 11–13h, 16–22h…) u redovima. Listaj tjedne strelicama. Admin tapne polje i odabere ljude; "+ dodaj termin" doda novi red (npr. 14–20 ili 19–22 kviz). <b>Kopiraj prošli tjedan</b> prepiše prošli tjedan kao početak. Tipka <b>🖨 Printaj</b> ispisuje tjedan.<br />
                 <b>Sati</b> — mjesečna tablica: sati svakog dana po osobi, sami se zbrajaju iz rasporeda. Nedjelja i blagdan +50%, bolovanje s doznakom 70%, bez doznake 0%. Admin upisuje bolovanja (i slika doznaku) i satnicu u tabu Tim, pa se vidi i iznos.<br />
