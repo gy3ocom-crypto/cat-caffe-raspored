@@ -78,7 +78,6 @@ async function createStore(init) {
 // ---------- constants ----------
 const DAYS = ["Pon", "Uto", "Sri", "Čet", "Pet", "Sub", "Ned"];
 const DAYS_LONG = ["Ponedjeljak", "Utorak", "Srijeda", "Četvrtak", "Petak", "Subota", "Nedjelja"];
-const WEEKEND_MIDDLE = [4, 5, 6];
 const ADMINS = ["Robert", "Vedrana"];
 const ROLES = [
   { id: "stalni", label: "stalni", plural: "Stalni", leave: 20 },
@@ -88,11 +87,24 @@ const ROLES = [
 ];
 const roleDef = (id) => ROLES.find((r) => r.id === id) || ROLES[0];
 
-const SHIFTS = [
-  { id: "jutarnja", label: "Jutarnja", time: "08–15", color: "bg-amber-100 text-amber-900 border-amber-300" },
-  { id: "srednja", label: "Srednja", time: "13–21", color: "bg-sky-100 text-sky-900 border-sky-300" },
-  { id: "vecernja", label: "Večernja", time: "15–23", color: "bg-rose-100 text-rose-900 border-rose-300" },
+// vrste stavki u danu; vrijeme se može promijeniti za svaku stavku posebno
+const TYPES = [
+  { id: "P", label: "Prijepodne", from: "11:00", to: "17:00", color: "bg-amber-100 text-amber-900 border-amber-300" },
+  { id: "D", label: "Popodne", from: "17:00", to: "22:00", color: "bg-rose-100 text-rose-900 border-rose-300" },
+  { id: "PD", label: "Cijeli dan", from: "11:00", to: "22:00", color: "bg-violet-100 text-violet-900 border-violet-300" },
+  { id: "M", label: "Međusmjena", from: "14:00", to: "19:00", color: "bg-sky-100 text-sky-900 border-sky-300" },
+  { id: "C", label: "Čišćenje", from: "11:00", to: "12:00", color: "bg-emerald-100 text-emerald-900 border-emerald-300" },
+  { id: "K", label: "Kviz", from: "19:00", to: "22:00", color: "bg-fuchsia-100 text-fuchsia-900 border-fuchsia-300" },
+  { id: "O", label: "Ostalo", from: "", to: "", color: "bg-stone-100 text-stone-800 border-stone-300" },
 ];
+const typeDef = (id) => TYPES.find((t) => t.id === id) || TYPES[TYPES.length - 1];
+// stare fiksne smjene (prije je svaki dan imao ove tri)
+const LEGACY_SHIFTS = [["jutarnja", "Jutarnja", "08:00", "15:00"], ["srednja", "Srednja", "13:00", "21:00"], ["vecernja", "Večernja", "15:00", "23:00"]];
+const itemLabel = (it) => it.label || typeDef(it.type).label;
+const itemTime = (it) => (it.from || it.to ? `${(it.from || "").replace(":00", "")}–${(it.to || "").replace(":00", "")}` : "");
+function mins(t) { const m = /^(\d{1,2}):(\d{2})$/.exec(t || ""); return m ? +m[1] * 60 + +m[2] : null; }
+function itemHours(it) { const a = mins(it.from), b = mins(it.to); return a == null || b == null || b <= a ? 0 : (b - a) / 60; }
+function newItemId() { return "i" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
 
 const HOLIDAYS = [
   { date: "2026-01-01", name: "Nova godina", closed: false },
@@ -134,10 +146,18 @@ function dayIdxOf(iso) { return (parseIso(iso).getDay() + 6) % 7; }
 function holidayFor(iso) { return HOLIDAYS.find((h) => h.date === iso) || null; }
 function isFerije(iso) { return FERIJE.some(([a, b]) => iso >= a && iso <= b); }
 function datesBetween(a, b) { const o = []; let c = parseIso(a); const e = parseIso(b); while (c <= e) { o.push(key(c)); c = addDays(c, 1); } return o; }
-function emptyWeek() { const w = {}; for (let i = 0; i < 7; i++) w[i] = { jutarnja: [], srednja: [], vecernja: [] }; return w; }
+// tjedan = { 0..6: [ { id, type, label, from, to, note, people: [id…] } ] }
+function emptyWeek() { const w = {}; for (let i = 0; i < 7; i++) w[i] = []; return w; }
 function safeWeek(raw) {
-  try { const w = JSON.parse(raw); const o = emptyWeek(); for (let i = 0; i < 7; i++) if (w[i]) { o[i].jutarnja = w[i].jutarnja || []; o[i].srednja = w[i].srednja || []; o[i].vecernja = w[i].vecernja || []; } return o; }
-  catch { return emptyWeek(); }
+  try {
+    const w = JSON.parse(raw); const o = emptyWeek();
+    for (let i = 0; i < 7; i++) {
+      const d = w[i]; if (!d) continue;
+      if (Array.isArray(d)) o[i] = d.map((it) => ({ id: it.id || newItemId(), type: it.type || "O", label: it.label || "", from: it.from || "", to: it.to || "", note: it.note || "", people: Array.isArray(it.people) ? it.people : [] }));
+      else LEGACY_SHIFTS.forEach(([id, label, from, to]) => { if ((d[id] || []).length) o[i].push({ id, type: "O", label, from, to, note: "", people: d[id] }); });
+    }
+    return o;
+  } catch { return emptyWeek(); }
 }
 function daysTo(iso) { if (!iso) return null; return Math.round((parseIso(iso) - new Date(key(new Date()) + "T00:00:00")) / 86400000); }
 
@@ -159,6 +179,7 @@ function App() {
   const [status, setStatus] = useState("");
   const [lastSync, setLastSync] = useState(null);
   const [picker, setPicker] = useState(null);
+  const [adding, setAdding] = useState(null);
   const [leaveDraft, setLeaveDraft] = useState({});
   const [swapDraft, setSwapDraft] = useState({ mutual: false });
   const [expanded, setExpanded] = useState(null);
@@ -198,17 +219,44 @@ function App() {
   const idOfName = (nm) => (roster.find((r) => r.name === nm) || {}).id || "";
   const onLeave = (id, iso) => (leave[id] || []).includes(iso);
 
-  function togglePerson(dayIdx, shiftId, pid) {
+  function editItems(dayIdx, fn) {
     if (!canEdit) return;
     const next = JSON.parse(JSON.stringify(week));
-    const arr = next[dayIdx][shiftId]; const at = arr.indexOf(pid);
-    if (at >= 0) arr.splice(at, 1); else arr.push(pid);
+    next[dayIdx] = fn(next[dayIdx]) || next[dayIdx];
     saveWeek(next);
   }
+  function togglePerson(dayIdx, itemId, pid) {
+    editItems(dayIdx, (items) => { const it = items.find((x) => x.id === itemId); if (!it) return; const at = it.people.indexOf(pid); if (at >= 0) it.people.splice(at, 1); else it.people.push(pid); });
+  }
+  function addItem(dayIdx, typeId, iso) {
+    const t = typeDef(typeId); const id = newItemId();
+    editItems(dayIdx, (items) => [...items, { id, type: t.id, label: "", from: t.from, to: t.to, note: "", people: [] }].sort((a, b) => (mins(a.from) ?? 9999) - (mins(b.from) ?? 9999)));
+    setAdding(null); setPicker({ day: dayIdx, item: id, iso });
+  }
+  function updateItem(dayIdx, itemId, patch) { editItems(dayIdx, (items) => items.map((x) => (x.id === itemId ? { ...x, ...patch } : x))); }
+  function removeItem(dayIdx, itemId) { editItems(dayIdx, (items) => items.filter((x) => x.id !== itemId)); setPicker(null); }
+  async function copyPrevWeek() {
+    if (!canEdit) return;
+    const has = Object.values(week).some((d) => d.length);
+    if (has && !confirm("Ovaj tjedan već ima unosa. Zamijeniti ga prošlim tjednom?")) return;
+    const raw = await sGet(`week:${key(addDays(weekStart, -7))}`);
+    if (!raw) { flash("prošli tjedan je prazan"); return; }
+    const w = safeWeek(raw); for (let i = 0; i < 7; i++) w[i] = w[i].map((it) => ({ ...it, id: newItemId() }));
+    saveWeek(w);
+  }
 
-  function conflicts(pid) { const o = []; for (let d = 0; d < 6; d++) if (week[d].vecernja.includes(pid) && week[d + 1].jutarnja.includes(pid)) o.push(d); return o; }
-  function holidayShifts(pid) { let c = 0; for (let i = 0; i < 7; i++) { const h = holidayFor(key(addDays(weekStart, i))); if (h && !h.closed) SHIFTS.forEach((s) => { if (week[i][s.id].includes(pid)) c++; }); } return c; }
-  const summary = roster.map((p) => { let c = 0; for (let i = 0; i < 7; i++) SHIFTS.forEach((s) => { if (week[i][s.id].includes(p.id)) c++; }); return { ...p, count: c, conflicts: conflicts(p.id), holiday: holidayShifts(p.id) }; });
+  // kasna smjena (do 22 ili kasnije) pa rana (od 11 ili ranije) sljedeći dan
+  function conflicts(pid) {
+    const o = [];
+    for (let d = 0; d < 6; d++) {
+      const late = week[d].some((it) => it.people.includes(pid) && (mins(it.to) ?? 0) >= 22 * 60);
+      const early = week[d + 1].some((it) => it.people.includes(pid) && mins(it.from) != null && mins(it.from) <= 11 * 60);
+      if (late && early) o.push(d);
+    }
+    return o;
+  }
+  function holidayShifts(pid) { let c = 0; for (let i = 0; i < 7; i++) { const h = holidayFor(key(addDays(weekStart, i))); if (h && !h.closed) week[i].forEach((it) => { if (it.people.includes(pid)) c++; }); } return c; }
+  const summary = roster.map((p) => { let c = 0, hrs = 0; for (let i = 0; i < 7; i++) week[i].forEach((it) => { if (it.people.includes(p.id)) { c++; hrs += itemHours(it); } }); return { ...p, count: c, hours: hrs, conflicts: conflicts(p.id), holiday: holidayShifts(p.id) }; });
 
   function leaveUsed(pid) { return (leave[pid] || []).filter((iso) => { if (holidayFor(iso)) return false; return parseIso(iso).getDay() !== 0; }).length; }
   function addLeave(pid) {
@@ -225,7 +273,7 @@ function App() {
     if (!canEdit) return;
     saveRoster(roster.filter((r) => r.id !== id));
     const next = JSON.parse(JSON.stringify(week));
-    for (let i = 0; i < 7; i++) SHIFTS.forEach((s) => { next[i][s.id] = next[i][s.id].filter((x) => x !== id); });
+    for (let i = 0; i < 7; i++) next[i].forEach((it) => { it.people = it.people.filter((x) => x !== id); });
     saveWeek(next);
   }
 
@@ -236,19 +284,23 @@ function App() {
     mut(w[dayIdxOf(iso)]); await sSet(`week:${wk}`, JSON.stringify(w));
     if (wk === weekKey) setWeek(JSON.parse(JSON.stringify(w)));
   }
-  function replaceIn(arr, a, b) { const i = arr.indexOf(a); if (i >= 0) arr.splice(i, 1); if (!arr.includes(b)) arr.push(b); }
+  // zamjena: osoba a predaje osobi b sve svoje stavke tog dana (ili samo onu jednu, kod starih zahtjeva)
+  function replaceIn(items, shiftId, a, b) {
+    items.forEach((it) => { if (shiftId && it.id !== shiftId) return; const i = it.people.indexOf(a); if (i < 0) return; it.people.splice(i, 1); if (!it.people.includes(b)) it.people.push(b); });
+  }
 
   async function applySwap(sw) {
-    await editDate(sw.fromDate, (day) => replaceIn(day[sw.fromShift], sw.fromPerson, sw.toPerson));
-    if (sw.mutual && sw.toDate && sw.toShift) await editDate(sw.toDate, (day) => replaceIn(day[sw.toShift], sw.toPerson, sw.fromPerson));
+    await editDate(sw.fromDate, (day) => replaceIn(day, sw.fromShift, sw.fromPerson, sw.toPerson));
+    if (sw.mutual && sw.toDate) await editDate(sw.toDate, (day) => replaceIn(day, sw.toShift, sw.toPerson, sw.fromPerson));
   }
+  const shiftName = (id) => { const l = LEGACY_SHIFTS.find((x) => x[0] === id); return l ? l[1] : ""; };
   function createSwap() {
     const d = swapDraft;
-    if (!d.fromPerson || !d.fromDate || !d.fromShift || !d.toPerson) { flash("ispuni sva polja"); return; }
+    if (!d.fromPerson || !d.fromDate || !d.toPerson) { flash("ispuni sva polja"); return; }
     if (d.fromPerson === d.toPerson) { flash("iste osobe"); return; }
     const sw = {
-      id: "sw" + Date.now(), fromPerson: d.fromPerson, fromDate: d.fromDate, fromShift: d.fromShift,
-      toPerson: d.toPerson, mutual: !!d.mutual, toDate: d.mutual ? d.toDate : "", toShift: d.mutual ? d.toShift : "",
+      id: "sw" + Date.now(), fromPerson: d.fromPerson, fromDate: d.fromDate, fromShift: "",
+      toPerson: d.toPerson, mutual: !!d.mutual, toDate: d.mutual ? d.toDate : "", toShift: "",
       confirmFrom: true, confirmTo: false, status: "pending", ts: Date.now(),
     };
     saveSwaps([sw, ...swaps]);
@@ -265,6 +317,7 @@ function App() {
   function deleteSwap(id) { saveSwaps(swaps.filter((x) => x.id !== id)); }
 
   const isThisWeek = key(mondayOf(new Date())) === weekKey;
+  const pickItem = picker ? (week[picker.day] || []).find((x) => x.id === picker.item) : null;
   const printWeek = () => window.print();
 
   async function savePins(next) { setPins(next); await sSet("pins", JSON.stringify(next)); }
@@ -389,14 +442,13 @@ function App() {
               </div>
               <div className="px-4 pt-3">
                 <button onClick={printWeek} className="w-full bg-stone-800 text-white py-2.5 rounded-xl text-sm font-semibold">🖨 Printaj ovaj tjedan</button>
+                {canEdit && <button onClick={copyPrevWeek} className="w-full mt-2 bg-stone-200 text-stone-800 py-2 rounded-xl text-sm">Kopiraj prošli tjedan</button>}
               </div>
 
               <div className="px-3 py-3 space-y-3 pb-40">
                 {DAYS.map((d, i) => {
                   const date = addDays(weekStart, i); const iso = key(date);
                   const h = holidayFor(iso); const fer = isFerije(iso); const closed = h && h.closed;
-                  const showMiddle = WEEKEND_MIDDLE.includes(i) || (h && !h.closed) || fer;
-                  const shifts = SHIFTS.filter((s) => s.id !== "srednja" || showMiddle);
                   return (
                     <div key={i} className="bg-white rounded-2xl border border-stone-200 overflow-hidden shadow-sm">
                       <div className="px-4 py-2 bg-stone-100 flex items-baseline justify-between"><span className="display font-bold">{DAYS_LONG[i]}</span><span className="text-xs text-stone-500">{shortHR(date)}</span></div>
@@ -408,21 +460,32 @@ function App() {
                       )}
                       {closed ? <div className="px-4 py-4 text-center text-red-500 text-sm">Kafić zatvoren — neradni dan</div> : (
                         <div className="divide-y divide-stone-100">
-                          {shifts.map((s) => {
+                          {week[i].length === 0 && !canEdit && <div className="px-4 py-3 text-stone-300 text-sm">—</div>}
+                          {week[i].map((it) => {
+                            const t = typeDef(it.type);
                             const cell = (
                               <span className="flex items-start gap-3 px-4 py-3 w-full">
-                                <span className={`text-[11px] font-semibold px-2 py-1 rounded-md border whitespace-nowrap ${s.color}`}>{s.label}<br /><span className="font-normal">{s.time}</span></span>
+                                <span className={`text-[11px] font-semibold px-2 py-1 rounded-md border whitespace-nowrap ${t.color}`}>{itemLabel(it)}{itemTime(it) && <><br /><span className="font-normal">{itemTime(it)}</span></>}</span>
                                 <span className="flex flex-wrap gap-1.5 pt-0.5 flex-1">
-                                  {week[i][s.id].length === 0 ? <span className="text-stone-300 text-sm">{canEdit ? "+ dodaj" : "—"}</span> :
-                                    week[i][s.id].map((pid) => { const lv = onLeave(pid, iso); return (
+                                  {it.people.length === 0 ? <span className="text-stone-300 text-sm">{canEdit ? "+ dodaj ljude" : "—"}</span> :
+                                    it.people.map((pid) => { const lv = onLeave(pid, iso); return (
                                       <span key={pid} className={`text-xs px-2 py-1 rounded-full ${lv ? "bg-amber-200 text-amber-900 line-through" : roleOf(pid) === "stalni" ? "bg-stone-800 text-white" : "bg-stone-200 text-stone-700"}`}>{nameOf(pid)}{lv ? " (G.O.)" : ""}</span>); })}
+                                  {it.note && <span className="w-full text-[11px] text-stone-500">{it.note}</span>}
                                 </span>
                               </span>
                             );
                             return canEdit
-                              ? <button key={s.id} onClick={() => setPicker({ day: i, shift: s.id, iso })} className="w-full text-left active:bg-stone-50">{cell}</button>
-                              : <div key={s.id}>{cell}</div>;
+                              ? <button key={it.id} onClick={() => setPicker({ day: i, item: it.id, iso })} className="w-full text-left active:bg-stone-50">{cell}</button>
+                              : <div key={it.id}>{cell}</div>;
                           })}
+                          {canEdit && (adding === i ? (
+                            <div className="px-4 py-3 flex flex-wrap gap-1.5">
+                              {TYPES.map((t) => <button key={t.id} onClick={() => addItem(i, t.id, iso)} className={`text-xs px-2.5 py-1.5 rounded-lg border ${t.color}`}>{t.label}{t.from ? ` ${t.from.replace(":00", "")}–${t.to.replace(":00", "")}` : ""}</button>)}
+                              <button onClick={() => setAdding(null)} className="text-xs px-2.5 py-1.5 text-stone-400">odustani</button>
+                            </div>
+                          ) : (
+                            <button onClick={() => setAdding(i)} className="w-full text-left px-4 py-2.5 text-sm text-sky-700 active:bg-stone-50">+ dodaj smjenu / čišćenje / kviz…</button>
+                          ))}
                         </div>
                       )}
                     </div>
@@ -432,12 +495,12 @@ function App() {
                 <div className="bg-white rounded-2xl border border-stone-200 p-4 shadow-sm">
                   <div className="display font-bold mb-2">Pregled tjedna</div>
                   {summary.some((p) => p.conflicts.length) && (
-                    <div className="mb-3 text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2">⚠ Večernja → jutarnja sljedeći dan:
+                    <div className="mb-3 text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2">⚠ Kasna smjena → rana sljedeći dan:
                       {summary.filter((p) => p.conflicts.length).map((p) => <div key={p.id}>• {p.name}: {p.conflicts.map((d) => `${DAYS[d]}→${DAYS[d + 1]}`).join(", ")}</div>)}
                     </div>
                   )}
                   <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-                    {summary.filter((p) => p.count > 0).map((p) => <div key={p.id} className="flex justify-between"><span>{p.name}{p.holiday > 0 && <span className="text-emerald-600 text-[11px]"> +50%×{p.holiday}</span>}</span><span className="text-stone-500">{p.count} sm.</span></div>)}
+                    {summary.filter((p) => p.count > 0).map((p) => <div key={p.id} className="flex justify-between"><span>{p.name}{p.holiday > 0 && <span className="text-emerald-600 text-[11px]"> +50%×{p.holiday}</span>}</span><span className="text-stone-500">{p.count} sm.{p.hours > 0 ? ` · ${Math.round(p.hours * 10) / 10} h` : ""}</span></div>)}
                   </div>
                 </div>
 
@@ -460,9 +523,6 @@ function App() {
                 </select>
                 <div className="flex gap-2 mb-2">
                   <input type="date" value={swapDraft.fromDate || ""} onChange={(e) => setSwapDraft({ ...swapDraft, fromDate: e.target.value })} className="flex-1 border border-stone-300 rounded-lg px-2 py-2 text-sm" />
-                  <select value={swapDraft.fromShift || ""} onChange={(e) => setSwapDraft({ ...swapDraft, fromShift: e.target.value })} className="border border-stone-300 rounded-lg px-2 py-2 text-sm">
-                    <option value="">smjena</option>{SHIFTS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-                  </select>
                 </div>
                 <label className="text-[11px] text-stone-400">Tko preuzima</label>
                 <select value={swapDraft.toPerson || ""} onChange={(e) => setSwapDraft({ ...swapDraft, toPerson: e.target.value })} className="w-full border border-stone-300 rounded-lg px-2 py-2 text-sm mb-2">
@@ -472,9 +532,6 @@ function App() {
                 {swapDraft.mutual && (
                   <div className="flex gap-2 mb-2">
                     <input type="date" value={swapDraft.toDate || ""} onChange={(e) => setSwapDraft({ ...swapDraft, toDate: e.target.value })} className="flex-1 border border-stone-300 rounded-lg px-2 py-2 text-sm" />
-                    <select value={swapDraft.toShift || ""} onChange={(e) => setSwapDraft({ ...swapDraft, toShift: e.target.value })} className="border border-stone-300 rounded-lg px-2 py-2 text-sm">
-                      <option value="">smjena</option>{SHIFTS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-                    </select>
                   </div>
                 )}
                 <button onClick={() => { if (!swapDraft.fromPerson && me !== "__viewer") swapDraft.fromPerson = idOfName(me); createSwap(); }} className="w-full bg-stone-800 text-white py-2.5 rounded-xl text-sm font-semibold">Pošalji zahtjev</button>
@@ -491,8 +548,8 @@ function App() {
                         <span className={`text-[11px] px-2 py-0.5 rounded-full ${badge}`}>{txt}</span>
                       </div>
                       <div className="text-xs text-stone-600">
-                        Daje: {shortHR(parseIso(sw.fromDate))} {SHIFTS.find((s) => s.id === sw.fromShift)?.label}
-                        {sw.mutual && sw.toDate ? ` ⇄ ${shortHR(parseIso(sw.toDate))} ${SHIFTS.find((s) => s.id === sw.toShift)?.label}` : ""}
+                        Daje: {shortHR(parseIso(sw.fromDate))} {shiftName(sw.fromShift)}
+                        {sw.mutual && sw.toDate ? ` ⇄ ${shortHR(parseIso(sw.toDate))} ${shiftName(sw.toShift)}` : ""}
                       </div>
                       {sw.status === "pending" && (
                         <div className="flex gap-2 mt-3">
@@ -578,14 +635,14 @@ function App() {
               <Section title="PIN">Svatko ima svoj PIN. Prvi put kad odabereš svoje ime, postaviš PIN (min. 4 znamenke); idući put ga upisuješ za ulaz. Tako se prijava i potvrda zamjena vežu na stvarnu osobu. Ako netko zaboravi PIN, Robert ili Vedrana ga resetiraju u tabu Tim (osoba postavi novi pri sljedećem ulazu). Napomena: PIN je interna brava za tim, ne i jaka lozinka.</Section>
               <Section title="Admini">Raspored, godišnji i članove tima uređuju <b>Robert</b> i <b>Vedrana</b>. Ostali vide raspored i mogu pisati napomene te tražiti/potvrđivati zamjene.</Section>
               <Section title="Kako se koristi">
-                <b>Raspored</b> — listaj tjedne strelicama. Admin tapne smjenu i odabere ljude. Tipka <b>🖨 Printaj</b> ispisuje tjedan.<br />
-                <b>Zamjene</b> — bilo tko zatraži zamjenu (tko daje, koji dan/smjena, tko preuzima). Čim druga strana tapne <b>Potvrđujem</b>, raspored se sam mijenja — bez admina.<br />
+                <b>Raspored</b> — listaj tjedne strelicama. Admin svaki dan dodaje što treba: prijepodne, popodne, cijeli dan, međusmjenu, čišćenje, kviz ili nešto svoje. Svakoj stavci može promijeniti vrijeme, dodati napomenu i staviti jednu ili više osoba. <b>Kopiraj prošli tjedan</b> prepiše prošli tjedan kao početak. Tipka <b>🖨 Printaj</b> ispisuje tjedan.<br />
+                <b>Zamjene</b> — bilo tko zatraži zamjenu (tko daje, koji dan, tko preuzima; predaje se sve što ta osoba ima taj dan). Čim druga strana tapne <b>Potvrđujem</b>, raspored se sam mijenja — bez admina.<br />
                 <b>Godišnji</b> — 20 radnih dana po stalnom; admin dodaje raspon datuma. Tko je na G.O. prikazan je precrtano.<br />
                 <b>Tim</b> — kontakt, email i sanitarna knjižica (izdana / vrijedi do). App upozorava kad sanitarna ističe (≤30 dana) ili je istekla.
               </Section>
               <Section title="Pravila">
-                Nema večernje (15–23) pa ujutro (08–15) sljedeći dan — app upozorava.<br />
-                Srednja smjena (13–21) samo petkom, vikendom, blagdanima i za vrijeme školskih ferija.<br />
+                Kasna smjena (do 22 ili kasnije) pa rana (od 11 ili ranije) sljedeći dan — app upozorava.<br />
+                Pregled tjedna zbraja smjene i sate po osobi.<br />
                 Blagdani nose +50%. <b>Uskrs (5.4.)</b> i <b>Božić (25.12.)</b> = zatvoreno.
               </Section>
               <Section title="Sinkronizacija">Podaci su dijeljeni — svi vide isto. App se sam osvježava svakih 12 s, ili tapni ↻.</Section>
@@ -598,13 +655,13 @@ function App() {
         <h2 style={{ margin: "0 0 2px" }}>Cat Cafe Zagreb — Tjedni raspored</h2>
         <div style={{ fontSize: 13, marginBottom: 10 }}>{shortHR(weekStart)} – {shortHR(addDays(weekStart, 6))} 2026</div>
         <table className="pt">
-          <thead><tr><th>Dan</th><th>Jutarnja 08–15</th><th>Srednja 13–21</th><th>Večernja 15–23</th></tr></thead>
+          <thead><tr><th>Dan</th><th>Raspored</th></tr></thead>
           <tbody>
             {DAYS.map((d, i) => {
               const iso = key(addDays(weekStart, i)); const h = holidayFor(iso);
-              if (h && h.closed) return <tr key={i}><td>{DAYS_LONG[i]} {shortHR(addDays(weekStart, i))}</td><td colSpan={3} style={{ textAlign: "center" }}>ZATVORENO — {h.name}</td></tr>;
-              const cell = (sid) => week[i][sid].map((pid) => nameOf(pid) + (onLeave(pid, iso) ? " (G.O.)" : "")).join(", ");
-              return <tr key={i}><td>{DAYS_LONG[i]} {shortHR(addDays(weekStart, i))}{h ? ` ★+50%` : ""}</td><td>{cell("jutarnja")}</td><td>{cell("srednja")}</td><td>{cell("vecernja")}</td></tr>;
+              if (h && h.closed) return <tr key={i}><td>{DAYS_LONG[i]} {shortHR(addDays(weekStart, i))}</td><td style={{ textAlign: "center" }}>ZATVORENO — {h.name}</td></tr>;
+              const names = (it) => it.people.map((pid) => nameOf(pid) + (onLeave(pid, iso) ? " (G.O.)" : "")).join(", ");
+              return <tr key={i}><td>{DAYS_LONG[i]} {shortHR(addDays(weekStart, i))}{h ? ` ★+50%` : ""}</td><td>{week[i].map((it) => <div key={it.id}><b>{itemLabel(it)} {itemTime(it)}</b>: {names(it) || "—"}{it.note ? ` (${it.note})` : ""}</div>)}</td></tr>;
             })}
           </tbody>
         </table>
@@ -612,23 +669,37 @@ function App() {
       </div>
 
       {/* picker */}
-      {picker && (
+      {picker && pickItem && (
         <div className="fixed inset-0 z-30 flex items-end" onClick={() => setPicker(null)}>
           <div className="absolute inset-0 bg-black/40" />
           <div className="relative w-full bg-white rounded-t-3xl max-h-[75vh] overflow-y-auto p-4" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-3"><div className="display font-bold">{DAYS_LONG[picker.day]} · {SHIFTS.find((s) => s.id === picker.shift).label} {SHIFTS.find((s) => s.id === picker.shift).time}</div><button onClick={() => setPicker(null)} className="text-stone-400 text-xl px-2">✕</button></div>
+            <div className="flex items-center justify-between mb-3"><div className="display font-bold">{DAYS_LONG[picker.day]} · {itemLabel(pickItem)} {itemTime(pickItem)}</div><button onClick={() => setPicker(null)} className="text-stone-400 text-xl px-2">✕</button></div>
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              <div className="col-span-2"><label className="text-[11px] text-stone-400">Vrsta</label>
+                <select value={pickItem.type} onChange={(e) => { const t = typeDef(e.target.value); updateItem(picker.day, pickItem.id, { type: t.id, label: "", from: t.from || pickItem.from, to: t.to || pickItem.to }); }} className="w-full border border-stone-300 rounded-lg px-2 py-2 text-sm">
+                  {TYPES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                </select></div>
+              <div><label className="text-[11px] text-stone-400">Od</label><input type="time" value={pickItem.from} onChange={(e) => updateItem(picker.day, pickItem.id, { from: e.target.value })} className="w-full border border-stone-300 rounded-lg px-2 py-2 text-sm" /></div>
+              <div><label className="text-[11px] text-stone-400">Do</label><input type="time" value={pickItem.to} onChange={(e) => updateItem(picker.day, pickItem.id, { to: e.target.value })} className="w-full border border-stone-300 rounded-lg px-2 py-2 text-sm" /></div>
+              <div className="col-span-2"><Field key={pickItem.id + "l"} label="Naziv (ako želiš svoj, npr. Rođendan, Inventura)" value={pickItem.label} onSave={(v) => updateItem(picker.day, pickItem.id, { label: v.trim() })} /></div>
+              <div className="col-span-2"><Field key={pickItem.id + "n"} label="Napomena" value={pickItem.note} onSave={(v) => updateItem(picker.day, pickItem.id, { note: v.trim() })} /></div>
+            </div>
+            <div className="text-[11px] uppercase tracking-wide text-stone-400 mb-1 mt-3">Tko radi</div>
             {ROLES.map((role) => {
               const members = roster.filter((r) => r.role === role.id);
               if (members.length === 0) return null;
               return (
               <div key={role.id} className="mb-3"><div className="text-[11px] uppercase tracking-wide text-stone-400 mb-1">{role.plural}</div>
                 <div className="flex flex-wrap gap-2">
-                  {members.map((p) => { const on = week[picker.day][picker.shift].includes(p.id); const lv = onLeave(p.id, picker.iso);
-                    return <button key={p.id} onClick={() => togglePerson(picker.day, picker.shift, p.id)} className={`px-3 py-2 rounded-full text-sm border ${on ? "bg-stone-800 text-white border-stone-800" : lv ? "bg-amber-50 text-amber-700 border-amber-300" : "bg-white text-stone-700 border-stone-300"}`}>{on ? "✓ " : ""}{p.name}{lv ? " (G.O.)" : ""}</button>; })}
+                  {members.map((p) => { const on = pickItem.people.includes(p.id); const lv = onLeave(p.id, picker.iso);
+                    return <button key={p.id} onClick={() => togglePerson(picker.day, pickItem.id, p.id)} className={`px-3 py-2 rounded-full text-sm border ${on ? "bg-stone-800 text-white border-stone-800" : lv ? "bg-amber-50 text-amber-700 border-amber-300" : "bg-white text-stone-700 border-stone-300"}`}>{on ? "✓ " : ""}{p.name}{lv ? " (G.O.)" : ""}</button>; })}
                 </div>
               </div>
             ); })}
-            <button onClick={() => setPicker(null)} className="w-full mt-2 bg-stone-100 py-3 rounded-xl text-sm font-semibold">Gotovo</button>
+            <div className="flex gap-2 mt-2">
+              <button onClick={() => { if (confirm("Obrisati " + itemLabel(pickItem) + "?")) removeItem(picker.day, pickItem.id); }} className="px-4 bg-red-50 text-red-700 border border-red-200 py-3 rounded-xl text-sm">Obriši</button>
+              <button onClick={() => setPicker(null)} className="flex-1 bg-stone-100 py-3 rounded-xl text-sm font-semibold">Gotovo</button>
+            </div>
           </div>
         </div>
       )}
