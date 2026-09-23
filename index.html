@@ -20,6 +20,11 @@ const { useState, useEffect, useRef, useCallback } = React;
 let BLOB_ID = new URLSearchParams(location.search).get("b") || null;
 let PROVIDER = new URLSearchParams(location.search).get("p") || "kvdb";
 let DB = {};
+// zapamti zadnji raspored na ovom uređaju, da se otvori i bez ?b= u linku
+try {
+  if (!BLOB_ID) { const last = JSON.parse(localStorage.getItem("catcafe_last") || "null"); if (last) { BLOB_ID = last.b; PROVIDER = last.p; history.replaceState(null, "", location.pathname + "?b=" + last.b + "&p=" + last.p); } }
+  else localStorage.setItem("catcafe_last", JSON.stringify({ b: BLOB_ID, p: PROVIDER }));
+} catch (e) {}
 const PROVIDERS = {
   kvdb: {
     async create(init) {
@@ -51,6 +56,12 @@ const PROVIDERS = {
     async get(id) { const r = await fetch("https://jsonblob.com/api/jsonBlob/" + id); if (!r.ok) throw new Error("jb get"); return await r.json(); },
     async put(id, obj) { await fetch("https://jsonblob.com/api/jsonBlob/" + id, { method: "PUT", headers: { "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify(obj) }); },
   },
+  // rezerva: ako nijedna online baza ne radi, spremi na ovaj uređaj
+  local: {
+    async create(init) { const id = "l" + Math.random().toString(36).slice(2, 10); localStorage.setItem("catcafe_" + id, JSON.stringify(init)); return id; },
+    async get(id) { const t = localStorage.getItem("catcafe_" + id); return t ? JSON.parse(t) : null; },
+    async put(id, obj) { localStorage.setItem("catcafe_" + id, JSON.stringify(obj)); },
+  },
 };
 function prov() { return PROVIDERS[PROVIDER] || PROVIDERS.kvdb; }
 async function refreshDB() { if (!BLOB_ID) return; try { const d = await prov().get(BLOB_ID); if (d) DB = d; } catch (e) {} }
@@ -58,7 +69,7 @@ async function persist() { if (!BLOB_ID) return; try { await prov().put(BLOB_ID,
 async function sGet(k) { return (DB && (k in DB)) ? DB[k] : null; }
 async function sSet(k, v) { try { DB[k] = v; await persist(); return true; } catch { return false; } }
 async function createStore(init) {
-  for (const p of ["kvdb", "jb"]) {
+  for (const p of ["kvdb", "jb", "local"]) {
     try { const id = await PROVIDERS[p].create(init); if (id) { PROVIDER = p; BLOB_ID = id; DB = init; return { id, p }; } } catch (e) {}
   }
   return null;
@@ -652,6 +663,8 @@ function Setup({ onReady }) {
       if (!res) throw new Error("noid");
       const url = location.origin + location.pathname + "?b=" + res.id + "&p=" + res.p;
       history.replaceState(null, "", url);
+      try { localStorage.setItem("catcafe_last", JSON.stringify({ b: res.id, p: res.p })); } catch (e) {}
+      if (res.p === "local") { onReady(); return; }
       setLink(url);
     } catch (e) { setErr("Ni jedna baza ne prolazi s ovog hosta. Pokušaj još jednom za par sekundi; ako i dalje ne ide, javi mi."); }
     setBusy(false);
