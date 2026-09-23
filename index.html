@@ -89,11 +89,11 @@ const roleDef = (id) => ROLES.find((r) => r.id === id) || ROLES[0];
 
 // vrste stavki u danu; vrijeme se može promijeniti za svaku stavku posebno
 const TYPES = [
-  { id: "P", label: "Prijepodne", from: "11:00", to: "17:00", color: "bg-amber-100 text-amber-900 border-amber-300" },
-  { id: "D", label: "Popodne", from: "17:00", to: "22:00", color: "bg-rose-100 text-rose-900 border-rose-300" },
+  { id: "P", label: "Prijepodne", from: "11:00", to: "16:00", color: "bg-amber-100 text-amber-900 border-amber-300" },
+  { id: "D", label: "Popodne", from: "16:00", to: "22:00", color: "bg-rose-100 text-rose-900 border-rose-300" },
+  { id: "C", label: "Čišćenje", from: "11:00", to: "13:00", color: "bg-emerald-100 text-emerald-900 border-emerald-300" },
+  { id: "M", label: "Međusmjena", from: "14:00", to: "20:00", color: "bg-sky-100 text-sky-900 border-sky-300" },
   { id: "PD", label: "Cijeli dan", from: "11:00", to: "22:00", color: "bg-violet-100 text-violet-900 border-violet-300" },
-  { id: "M", label: "Međusmjena", from: "14:00", to: "19:00", color: "bg-sky-100 text-sky-900 border-sky-300" },
-  { id: "C", label: "Čišćenje", from: "11:00", to: "12:00", color: "bg-emerald-100 text-emerald-900 border-emerald-300" },
   { id: "K", label: "Kviz", from: "19:00", to: "22:00", color: "bg-fuchsia-100 text-fuchsia-900 border-fuchsia-300" },
   { id: "O", label: "Ostalo", from: "", to: "", color: "bg-stone-100 text-stone-800 border-stone-300" },
 ];
@@ -131,7 +131,7 @@ const FERIJE = [
 
 const DEFAULT_ROSTER = [
   ["Vedrana", "stalni"], ["Inoslav", "stalni"], ["Terra", "stalni"],
-  ["Nives", "student"], ["Hana", "student"], ["Nikol", "student"], ["Viktorija", "student"], ["Lucija", "student"], ["Ena", "student"],
+  ["Nives", "student"], ["Hana", "student"], ["Nikol", "student"], ["Viktorija", "student"], ["Lucija", "student"], ["Ena", "student"], ["Boris", "student"],
 ].map(([name, role], i) => ({ id: "p" + i, name, role, phone: "", email: "", sanIssued: "", sanExpiry: "" }));
 // stari tim koji je aplikacija prije stavljala sama; takav spremljeni tim zamijeni novim
 const OLD_DEFAULT_NAMES = "Vedrana,Jana,Inoslav,Patricija,Terra,Ivan,Agneza,Nives,Ena,Jelena,Roko,Lucija";
@@ -146,6 +146,38 @@ function dayIdxOf(iso) { return (parseIso(iso).getDay() + 6) % 7; }
 function holidayFor(iso) { return HOLIDAYS.find((h) => h.date === iso) || null; }
 function isFerije(iso) { return FERIJE.some(([a, b]) => iso >= a && iso <= b); }
 function datesBetween(a, b) { const o = []; let c = parseIso(a); const e = parseIso(b); while (c <= e) { o.push(key(c)); c = addDays(c, 1); } return o; }
+// tjedni prepisani iz rasporeda s WhatsAppa; vrijede dok admin ne spremi svoju verziju tog tjedna
+// [dan 0-6, vrsta, od, do, imena…]
+const SEED_WEEKS = {
+  "2026-09-21": [
+    [0, "P", "11:00", "16:00", "Nives"], [0, "C", "11:00", "13:00", "Viktorija"], [0, "D", "16:00", "22:00", "Inoslav", "Nikol"],
+    [1, "P", "11:00", "16:00", "Inoslav"], [1, "C", "11:00", "13:00", "Viktorija"], [1, "D", "16:00", "22:00", "Nives", "Nikol"],
+    [2, "P", "11:00", "16:00", "Inoslav"], [2, "D", "16:00", "22:00", "Nives", "Hana"],
+    [3, "P", "11:00", "16:00", "Inoslav", "Nikol"], [3, "D", "16:00", "22:00", "Nives", "Hana"],
+    [4, "P", "11:00", "16:00", "Nives", "Viktorija"], [4, "D", "16:00", "22:00", "Inoslav", "Hana"],
+    [5, "P", "11:00", "16:00", "Nives", "Viktorija"], [5, "M", "14:00", "20:00", "Lucija"], [5, "D", "16:00", "22:00", "Boris", "Nikol"],
+    [6, "P", "11:00", "16:00", "Nives", "Lucija"], [6, "D", "16:00", "22:00", "Boris", "Hana"],
+  ],
+  "2026-09-28": [
+    [0, "P", "11:00", "16:00", "Inoslav"], [0, "C", "11:00", "13:00", "Nives"], [0, "D", "16:00", "22:00", "Nikol", "Viktorija"],
+    [1, "P", "11:00", "16:00", "Inoslav"], [1, "D", "16:00", "22:00", "Terra", "Viktorija"],
+    [2, "P", "11:00", "16:00", "Inoslav"], [2, "D", "16:00", "22:00", "Terra", "Hana"],
+    [3, "P", "11:00", "16:00", "Inoslav", "Nikol"], [3, "D", "16:00", "22:00", "Terra", "Hana"],
+    [4, "P", "11:00", "16:00", "Inoslav"], [4, "C", "11:00", "13:00", "Nives"], [4, "D", "16:00", "22:00", "Nives", "Hana"],
+    [5, "P", "11:00", "16:00", "Terra", "Nikol"], [5, "D", "16:00", "22:00", "Nives", "Lucija"],
+    [6, "P", "11:00", "16:00", "Nikol", "Lucija"], [6, "D", "16:00", "22:00", "Nives", "Hana"],
+  ],
+};
+function seedWeek(wk, roster) {
+  const w = emptyWeek(); const rows = SEED_WEEKS[wk]; if (!rows) return w;
+  rows.forEach(([d, type, from, to, ...names], n) => {
+    const people = names.map((nm) => (roster.find((r) => r.name === nm) || {}).id).filter(Boolean);
+    w[d].push({ id: `s${wk}-${n}`, type, label: "", from, to, note: "", people });
+  });
+  return w;
+}
+const weekFrom = (raw, wk, roster) => (raw ? safeWeek(raw) : seedWeek(wk, roster));
+
 // tjedan = { 0..6: [ { id, type, label, from, to, note, people: [id…] } ] }
 function emptyWeek() { const w = {}; for (let i = 0; i < 7; i++) w[i] = []; return w; }
 function safeWeek(raw) {
@@ -196,7 +228,9 @@ function App() {
     const [r, w, n, l, s, pin] = await Promise.all([sGet("roster"), sGet(`week:${weekKey}`), sGet(`notes:${weekKey}`), sGet("leave"), sGet("swaps"), sGet("pins")]);
     if (pin) { try { setPins(JSON.parse(pin)); } catch {} }
     if (r) { try { const pr = JSON.parse(r); if (pr.map((x) => x.name).join(",") === OLD_DEFAULT_NAMES) { setRoster(DEFAULT_ROSTER); await sSet("roster", JSON.stringify(DEFAULT_ROSTER)); } else setRoster(pr); } catch {} } else if (!silent) await sSet("roster", JSON.stringify(DEFAULT_ROSTER));
-    setWeek(w ? safeWeek(w) : emptyWeek());
+    let ro = DEFAULT_ROSTER; try { if (r) ro = JSON.parse(r); } catch (e) {}
+    if (ro.map((x) => x.name).join(",") === OLD_DEFAULT_NAMES) ro = DEFAULT_ROSTER;
+    setWeek(weekFrom(w, weekKey, ro));
     if (!notesFocused.current) setNotes(n || "");
     if (l) { try { setLeave(JSON.parse(l)); } catch {} }
     if (s) { try { setSwaps(JSON.parse(s)); } catch {} }
@@ -239,9 +273,9 @@ function App() {
     if (!canEdit) return;
     const has = Object.values(week).some((d) => d.length);
     if (has && !confirm("Ovaj tjedan već ima unosa. Zamijeniti ga prošlim tjednom?")) return;
-    const raw = await sGet(`week:${key(addDays(weekStart, -7))}`);
-    if (!raw) { flash("prošli tjedan je prazan"); return; }
-    const w = safeWeek(raw); for (let i = 0; i < 7; i++) w[i] = w[i].map((it) => ({ ...it, id: newItemId() }));
+    const pk = key(addDays(weekStart, -7)); const raw = await sGet(`week:${pk}`);
+    const w = weekFrom(raw, pk, roster);
+    if (!Object.values(w).some((d) => d.length)) { flash("prošli tjedan je prazan"); return; } for (let i = 0; i < 7; i++) w[i] = w[i].map((it) => ({ ...it, id: newItemId() }));
     saveWeek(w);
   }
 
@@ -280,7 +314,7 @@ function App() {
   // ----- swaps (peer-confirmed, no admin) -----
   async function editDate(iso, mut) {
     const wk = key(mondayOf(parseIso(iso)));
-    const raw = await sGet(`week:${wk}`); const w = raw ? safeWeek(raw) : emptyWeek();
+    const raw = await sGet(`week:${wk}`); const w = weekFrom(raw, wk, roster);
     mut(w[dayIdxOf(iso)]); await sSet(`week:${wk}`, JSON.stringify(w));
     if (wk === weekKey) setWeek(JSON.parse(JSON.stringify(w)));
   }
@@ -419,11 +453,12 @@ function App() {
           </div>
           <div className="flex gap-2 overflow-x-auto pb-1">
             <TabBtn id="raspored" label="Raspored" /><TabBtn id="zamjene" label="Zamjene" />
+            <TabBtn id="sati" label="Sati" /><TabBtn id="kasa" label="Kasa" />
             <TabBtn id="godisnji" label="Godišnji" /><TabBtn id="tim" label="Tim" /><TabBtn id="upute" label="Upute" />
           </div>
         </div>
 
-        {!canEdit && tab !== "zamjene" && tab !== "upute" && (
+        {!canEdit && tab !== "zamjene" && tab !== "upute" && tab !== "kasa" && tab !== "sati" && (
           <div className="bg-amber-50 border-b border-amber-200 text-amber-800 text-[12px] px-4 py-2">
             Pregled — raspored uređuju Robert i Vedrana. Zamjene smjena možeš tražiti i potvrđivati sam.
           </div>
@@ -588,6 +623,10 @@ function App() {
                 );
               })}
             </div>
+          ) : tab === "sati" ? (
+            <SatiTab roster={roster} canEdit={canEdit} meId={idOfName(me)} leave={leave} flash={flash} />
+          ) : tab === "kasa" ? (
+            <KasaTab roster={roster} me={me} meId={idOfName(me)} canEdit={canEdit} flash={flash} />
           ) : tab === "tim" ? (
             <div className="px-3 py-3 space-y-2 pb-40">
               {roster.map((p) => {
@@ -603,6 +642,7 @@ function App() {
                       <div className="px-4 pb-4 space-y-2" style={{ fontFamily: "system-ui,sans-serif" }}>
                         <Field label="Kontakt broj" type="tel" value={p.phone} onSave={(v) => updateMember(p.id, "phone", v)} disabled={!canEdit} />
                         <Field label="Email" type="email" value={p.email} onSave={(v) => updateMember(p.id, "email", v)} disabled={!canEdit} />
+                        {canEdit && <Field label="Satnica (€ po satu) — za izračun u tabu Sati" value={p.rate} onSave={(v) => updateMember(p.id, "rate", v.trim())} />}
                         <div className="flex gap-2">
                           <div className="flex-1"><Field label="Sanitarna — izdana" type="date" value={p.sanIssued} onSave={(v) => updateMember(p.id, "sanIssued", v)} disabled={!canEdit} /></div>
                           <div className="flex-1"><Field label="Vrijedi do" type="date" value={p.sanExpiry} onSave={(v) => updateMember(p.id, "sanExpiry", v)} disabled={!canEdit} /></div>
@@ -636,6 +676,8 @@ function App() {
               <Section title="Admini">Raspored, godišnji i članove tima uređuju <b>Robert</b> i <b>Vedrana</b>. Ostali vide raspored i mogu pisati napomene te tražiti/potvrđivati zamjene.</Section>
               <Section title="Kako se koristi">
                 <b>Raspored</b> — listaj tjedne strelicama. Admin svaki dan dodaje što treba: prijepodne, popodne, cijeli dan, međusmjenu, čišćenje, kviz ili nešto svoje. Svakoj stavci može promijeniti vrijeme, dodati napomenu i staviti jednu ili više osoba. <b>Kopiraj prošli tjedan</b> prepiše prošli tjedan kao početak. Tipka <b>🖨 Printaj</b> ispisuje tjedan.<br />
+                <b>Sati</b> — mjesečna tablica: sati svakog dana po osobi, sami se zbrajaju iz rasporeda. Nedjelja i blagdan +50%, bolovanje s doznakom 70%, bez doznake 0%. Admin upisuje bolovanja (i slika doznaku) i satnicu u tabu Tim, pa se vidi i iznos.<br />
+                <b>Kasa</b> — tablica za svaki dan: pozajmice iz kase i povrati, plaćanja u trgovini (kartica/gotovina), manjak, višak, bakšiš. Uz svaki unos možeš slikati R1 račun ili drugi dokument. Dolje piše tko još duguje kasi.<br />
                 <b>Zamjene</b> — bilo tko zatraži zamjenu (tko daje, koji dan, tko preuzima; predaje se sve što ta osoba ima taj dan). Čim druga strana tapne <b>Potvrđujem</b>, raspored se sam mijenja — bez admina.<br />
                 <b>Godišnji</b> — 20 radnih dana po stalnom; admin dodaje raspon datuma. Tko je na G.O. prikazan je precrtano.<br />
                 <b>Tim</b> — kontakt, email i sanitarna knjižica (izdana / vrijedi do). App upozorava kad sanitarna ističe (≤30 dana) ili je istekla.
@@ -645,7 +687,7 @@ function App() {
                 Pregled tjedna zbraja smjene i sate po osobi.<br />
                 Blagdani nose +50%. <b>Uskrs (5.4.)</b> i <b>Božić (25.12.)</b> = zatvoreno.
               </Section>
-              <Section title="Sinkronizacija">Podaci su dijeljeni — svi vide isto. App se sam osvježava svakih 12 s, ili tapni ↻.</Section>
+              <Section title="Sinkronizacija">{PROVIDER === "local" ? "Podaci (i slike) su zasad spremljeni samo na ovom uređaju." : "Podaci su dijeljeni — svi vide isto. App se sam osvježava svakih 12 s, ili tapni ↻. Slike računa i doznaka ostaju na uređaju na kojem su slikane."}</Section>
             </div>
           )}
       </div>
@@ -722,6 +764,332 @@ function Section({ title, children }) {
   return <div className="bg-white rounded-2xl border border-stone-200 p-4 shadow-sm"><div className="display font-bold mb-1">{title}</div><div className="text-stone-700">{children}</div></div>;
 }
 
+
+// ---------- slike (R1 računi, doznake…) — spremaju se na ovaj uređaj ----------
+function photoDb() {
+  return new Promise((res, rej) => { const r = indexedDB.open("catcafe_photos", 1); r.onupgradeneeded = () => r.result.createObjectStore("p"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+}
+async function photoTx(mode, fn) {
+  const db = await photoDb();
+  return new Promise((res, rej) => { const tx = db.transaction("p", mode); const out = fn(tx.objectStore("p")); tx.oncomplete = () => res(out && out.result); tx.onerror = () => rej(tx.error); });
+}
+const photoPut = (id, blob) => photoTx("readwrite", (st) => { st.put(blob, id); });
+const photoGet = (id) => photoTx("readonly", (st) => st.get(id));
+const photoDel = (id) => photoTx("readwrite", (st) => { st.delete(id); });
+function shrinkImage(file) {
+  return new Promise((res) => {
+    const url = URL.createObjectURL(file); const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, 1600 / Math.max(img.width, img.height)); const c = document.createElement("canvas");
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url); c.toBlob((b) => res(b || file), "image/jpeg", 0.8);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); res(file); };
+    img.src = url;
+  });
+}
+function Thumb({ id, onOpen, onRemove }) {
+  const [url, setUrl] = useState(null);
+  useEffect(() => { let u; photoGet(id).then((b) => { if (b) { u = URL.createObjectURL(b); setUrl(u); } }).catch(() => {}); return () => { if (u) URL.revokeObjectURL(u); }; }, [id]);
+  return (
+    <span className="relative inline-block">
+      <button onClick={() => url && onOpen(url)} className="w-14 h-14 rounded-lg border border-stone-300 bg-stone-100 overflow-hidden block">{url ? <img src={url} className="w-full h-full object-cover" /> : <span className="text-[10px] text-stone-400">nema</span>}</button>
+      {onRemove && <button onClick={onRemove} className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-600 text-white text-[10px] leading-5">✕</button>}
+    </span>
+  );
+}
+function Photos({ ids, onChange, canEdit, label }) {
+  const [view, setView] = useState(null);
+  const [busy, setBusy] = useState(false);
+  async function add(files) {
+    setBusy(true); const added = [];
+    for (const f of Array.from(files || [])) { try { const id = "ph" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); await photoPut(id, await shrinkImage(f)); added.push(id); } catch (e) {} }
+    setBusy(false); if (added.length) onChange([...(ids || []), ...added]);
+  }
+  function remove(id) { if (!confirm("Obrisati sliku?")) return; photoDel(id).catch(() => {}); onChange((ids || []).filter((x) => x !== id)); }
+  return (
+    <div className="flex flex-wrap gap-2 items-center">
+      {(ids || []).map((id) => <Thumb key={id} id={id} onOpen={setView} onRemove={canEdit ? () => remove(id) : null} />)}
+      {canEdit && (
+        <label className="w-14 h-14 rounded-lg border-2 border-dashed border-stone-300 text-stone-500 flex flex-col items-center justify-center text-[10px] cursor-pointer">
+          <span className="text-lg leading-none">📷</span>{busy ? "…" : label || "slikaj"}
+          <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { add(e.target.files); e.target.value = ""; }} />
+        </label>
+      )}
+      {view && (
+        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-2" onClick={() => setView(null)}>
+          <img src={view} className="max-w-full max-h-full" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------- mjesec, novac ----------
+const MONTHS = ["Siječanj", "Veljača", "Ožujak", "Travanj", "Svibanj", "Lipanj", "Srpanj", "Kolovoz", "Rujan", "Listopad", "Studeni", "Prosinac"];
+const ymOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+function addMonth(ym, k) { const [y, m] = ym.split("-").map(Number); return ymOf(new Date(y, m - 1 + k, 1)); }
+function monthDays(ym) { const [y, m] = ym.split("-").map(Number); const n = new Date(y, m, 0).getDate(); return Array.from({ length: n }, (_, i) => `${ym}-${String(i + 1).padStart(2, "0")}`); }
+const monthName = (ym) => `${MONTHS[+ym.slice(5, 7) - 1]} ${ym.slice(0, 4)}.`;
+const num = (v) => { const x = parseFloat(String(v ?? "").replace(",", ".")); return isNaN(x) ? 0 : x; };
+const eur = (n) => n.toLocaleString("hr-HR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+const money = (n) => n.toLocaleString("hr-HR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const hrs = (n) => (Math.round(n * 100) / 100).toLocaleString("hr-HR");
+const bonusDay = (iso) => { const h = holidayFor(iso); return parseIso(iso).getDay() === 0 || !!(h && !h.closed); };
+function MonthNav({ ym, setYm }) {
+  return (
+    <div className="px-4 py-3 flex items-center justify-between bg-white border-b border-stone-200">
+      <button onClick={() => setYm(addMonth(ym, -1))} className="px-3 py-2 rounded-lg bg-stone-100 active:bg-stone-200">‹</button>
+      <div className="display font-bold text-sm">{monthName(ym)}</div>
+      <button onClick={() => setYm(addMonth(ym, 1))} className="px-3 py-2 rounded-lg bg-stone-100 active:bg-stone-200">›</button>
+    </div>
+  );
+}
+const dd = (iso) => `${iso.slice(8, 10)}.`;
+
+// ---------- SATI: sati iz rasporeda, +50% nedjelja/blagdan, bolovanje 70% / 0% ----------
+function SatiTab({ roster, canEdit, meId, leave, flash }) {
+  const [ym, setYm] = useState(() => ymOf(new Date()));
+  const [weeks, setWeeks] = useState({});
+  const [sick, setSick] = useState([]);
+  const [draft, setDraft] = useState({ doznaka: true, hpd: "6" });
+  useEffect(() => {
+    (async () => {
+      const ks = [...new Set(monthDays(ym).map((d) => key(mondayOf(parseIso(d)))))]; const o = {};
+      for (const k of ks) { const r = await sGet(`week:${k}`); o[k] = weekFrom(r, k, roster); }
+      setWeeks(o);
+      const sr = await sGet("sick"); try { setSick(sr ? JSON.parse(sr) : []); } catch (e) {}
+    })();
+  }, [ym]);
+  async function saveSick(next) { setSick(next); await sSet("sick", JSON.stringify(next)); flash("bolovanje ✓"); }
+  function addSick() {
+    if (!draft.pid || !draft.od) { flash("odaberi osobu i datum"); return; }
+    const to = draft.do || draft.od; if (to < draft.od) { flash("krivi datumi"); return; }
+    saveSick([{ id: "b" + Date.now(), pid: draft.pid, od: draft.od, do: to, doznaka: !!draft.doznaka, hpd: draft.hpd || "0", photos: [] }, ...sick]);
+    setDraft({ doznaka: true, hpd: draft.hpd });
+  }
+  const updSick = (id, patch) => saveSick(sick.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+
+  const days = monthDays(ym);
+  const people = canEdit ? roster : roster.filter((p) => p.id === meId);
+  const itemsOn = (iso) => { const w = weeks[key(mondayOf(parseIso(iso)))]; return w ? w[dayIdxOf(iso)] : []; };
+  const sickOn = (pid, iso) => sick.find((x) => x.pid === pid && iso >= x.od && iso <= x.do);
+  // bolovanje se broji kao godišnji: bez nedjelja i blagdana
+  const sickCounts = (iso) => parseIso(iso).getDay() !== 0 && !holidayFor(iso);
+  function cell(pid, iso) {
+    const b = sickOn(pid, iso); if (b) return { kind: "B", b, counts: sickCounts(iso) };
+    if ((leave[pid] || []).includes(iso)) return { kind: "GO" };
+    const h = itemsOn(iso).filter((it) => it.people.includes(pid)).reduce((a, it) => a + itemHours(it), 0);
+    return { kind: "W", h, bonus: bonusDay(iso) };
+  }
+  const tot = {};
+  people.forEach((p) => {
+    const t = { h: 0, b: 0, s70: 0, s70d: 0, s0d: 0, go: 0 };
+    days.forEach((iso) => {
+      const c = cell(p.id, iso);
+      if (c.kind === "W") { t.h += c.h; if (c.bonus) t.b += c.h; }
+      else if (c.kind === "GO") t.go++;
+      else if (c.counts) { if (c.b.doznaka) { t.s70 += num(c.b.hpd); t.s70d++; } else t.s0d++; }
+    });
+    t.obr = t.h + 0.5 * t.b + 0.7 * t.s70; t.eur = num(p.rate) ? t.obr * num(p.rate) : null;
+    tot[p.id] = t;
+  });
+  const foot = [
+    ["Ukupno sati", (t) => hrs(t.h)],
+    ["od toga nedjelja/blagdan (+50%)", (t) => hrs(t.b)],
+    ["Bolovanje s doznakom (70%)", (t) => (t.s70d ? `${t.s70d} d · ${hrs(t.s70)} h` : "0")],
+    ["Bolovanje bez doznake (0%)", (t) => (t.s0d ? `${t.s0d} d` : "0")],
+    ["Godišnji", (t) => (t.go ? `${t.go} d` : "0")],
+    ["Obračunski sati", (t) => <b>{hrs(t.obr)}</b>],
+    ...(canEdit ? [["Iznos (satnica iz taba Tim)", (t) => (t.eur == null ? <span className="text-stone-400">upiši satnicu</span> : <b>{eur(t.eur)}</b>)]] : []),
+  ];
+  const monthSick = sick.filter((x) => x.do >= days[0] && x.od <= days[days.length - 1] && (canEdit || x.pid === meId));
+  const nameOf = (id) => (roster.find((r) => r.id === id) || {}).name || "?";
+  if (!people.length) return <div className="p-8 text-center text-stone-400 text-sm">Sati vidi samo prijavljena osoba (ili admin za sve).</div>;
+  return (
+    <div className="pb-40">
+      <MonthNav ym={ym} setYm={setYm} />
+      <div className="px-4 py-2 text-[11px] text-stone-500">Sati se sami zbrajaju iz rasporeda. <b className="text-emerald-700">Zeleno</b> = nedjelja ili blagdan (+50%). <b className="text-red-600">B</b> = bolovanje (70% s doznakom, 0% bez). GO = godišnji.<br />Obračunski sati = sati + 50% sati nedjeljom/blagdanom + 70% sati bolovanja s doznakom.</div>
+      <div className="overflow-x-auto mx-3 bg-white rounded-2xl border border-stone-200 shadow-sm">
+        <table className="text-xs border-collapse min-w-full" style={{ fontFamily: "system-ui,sans-serif" }}>
+          <thead><tr className="bg-stone-100"><th className="sticky left-0 bg-stone-100 px-2 py-2 text-left">Dan</th>{people.map((p) => <th key={p.id} className="px-2 py-2 whitespace-nowrap">{p.name}</th>)}</tr></thead>
+          <tbody>
+            {days.map((iso) => {
+              const wd = (parseIso(iso).getDay() + 6) % 7; const h = holidayFor(iso); const bd = bonusDay(iso);
+              return (
+                <tr key={iso} className={`border-t border-stone-100 ${bd ? "bg-emerald-50" : ""}`}>
+                  <td className={`sticky left-0 px-2 py-1.5 whitespace-nowrap ${bd ? "bg-emerald-50 text-emerald-800" : "bg-white"}`}>{dd(iso)} {DAYS[wd]}{h ? " ★" : ""}</td>
+                  {people.map((p) => {
+                    const c = cell(p.id, iso);
+                    return <td key={p.id} className="px-2 py-1.5 text-center">{c.kind === "B" ? <span className={`font-bold ${c.b.doznaka ? "text-red-600" : "text-stone-400"}`}>B{c.b.doznaka ? "" : " 0%"}</span> : c.kind === "GO" ? <span className="text-amber-700">GO</span> : c.h ? <span className={c.bonus ? "font-bold text-emerald-700" : ""}>{hrs(c.h)}</span> : <span className="text-stone-300">·</span>}</td>;
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            {foot.map(([label, f]) => (
+              <tr key={label} className="border-t border-stone-300 bg-stone-50"><td className="sticky left-0 bg-stone-50 px-2 py-1.5 text-[11px]">{label}</td>{people.map((p) => <td key={p.id} className="px-2 py-1.5 text-center whitespace-nowrap">{f(tot[p.id])}</td>)}</tr>
+            ))}
+          </tfoot>
+        </table>
+      </div>
+
+      <div className="mx-3 mt-3 bg-white rounded-2xl border border-stone-200 p-4 shadow-sm">
+        <div className="display font-bold mb-2">Bolovanja</div>
+        {monthSick.length === 0 && <div className="text-sm text-stone-400 mb-2">Nema bolovanja u ovom mjesecu.</div>}
+        {monthSick.map((x) => (
+          <div key={x.id} className="border-t border-stone-100 py-2">
+            <div className="flex items-center justify-between text-sm">
+              <span>{nameOf(x.pid)} · {shortHR(parseIso(x.od))}–{shortHR(parseIso(x.do))}</span>
+              <span className={`text-[11px] px-2 py-0.5 rounded-full ${x.doznaka ? "bg-red-100 text-red-700" : "bg-stone-200 text-stone-600"}`}>{x.doznaka ? "doznaka · 70%" : "bez doznake · 0%"}</span>
+            </div>
+            {canEdit && (
+              <div className="flex items-center gap-3 text-xs mt-1">
+                <label className="flex items-center gap-1"><input type="checkbox" checked={!!x.doznaka} onChange={(e) => updSick(x.id, { doznaka: e.target.checked })} /> ima doznaku</label>
+                <label className="flex items-center gap-1">sati/dan <input value={x.hpd} inputMode="decimal" onChange={(e) => updSick(x.id, { hpd: e.target.value })} className="w-12 border border-stone-300 rounded px-1 py-0.5" /></label>
+                <button onClick={() => { if (confirm("Obrisati bolovanje?")) saveSick(sick.filter((y) => y.id !== x.id)); }} className="text-red-500 ml-auto">obriši</button>
+              </div>
+            )}
+            <div className="mt-2"><Photos ids={x.photos} canEdit={canEdit} label="doznaka" onChange={(ph) => updSick(x.id, { photos: ph, doznaka: ph.length ? true : x.doznaka })} /></div>
+          </div>
+        ))}
+        {canEdit && (
+          <div className="border-t border-stone-200 pt-3 mt-2 space-y-2" style={{ fontFamily: "system-ui,sans-serif" }}>
+            <select value={draft.pid || ""} onChange={(e) => setDraft({ ...draft, pid: e.target.value })} className="w-full border border-stone-300 rounded-lg px-2 py-2 text-sm"><option value="">tko je na bolovanju</option>{roster.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+            <div className="flex gap-2 items-center">
+              <input type="date" value={draft.od || ""} onChange={(e) => setDraft({ ...draft, od: e.target.value })} className="flex-1 border border-stone-300 rounded-lg px-2 py-1.5 text-sm" />–
+              <input type="date" value={draft.do || ""} onChange={(e) => setDraft({ ...draft, do: e.target.value })} className="flex-1 border border-stone-300 rounded-lg px-2 py-1.5 text-sm" />
+            </div>
+            <div className="flex gap-3 items-center text-sm">
+              <label className="flex items-center gap-1"><input type="checkbox" checked={!!draft.doznaka} onChange={(e) => setDraft({ ...draft, doznaka: e.target.checked })} /> ima doznaku</label>
+              <label className="flex items-center gap-1">sati/dan <input value={draft.hpd} inputMode="decimal" onChange={(e) => setDraft({ ...draft, hpd: e.target.value })} className="w-12 border border-stone-300 rounded px-1 py-1" /></label>
+              <button onClick={addSick} className="ml-auto bg-stone-800 text-white px-3 py-1.5 rounded-lg">+ dodaj</button>
+            </div>
+            <div className="text-[11px] text-stone-400">Sliku doznake dodaš nakon spremanja (📷 ispod bolovanja).</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------- KASA: pozajmice, povrati, trgovina, manjak/višak, bakšiš, računi ----------
+const KASA_TYPES = [
+  { id: "pozajmica", label: "Pozajmica iz kase", person: true },
+  { id: "povrat", label: "Povrat u kasu", person: true },
+  { id: "trgovina", label: "Plaćanje u trgovini", pay: true },
+  { id: "manjak", label: "Manjak" },
+  { id: "visak", label: "Višak" },
+  { id: "baksis", label: "Bakšiš", pay: true },
+  { id: "dokument", label: "Samo dokument / račun", noAmount: true },
+];
+const kasaDef = (id) => KASA_TYPES.find((t) => t.id === id) || KASA_TYPES[KASA_TYPES.length - 1];
+const KASA_COLS = [
+  ["Pozajm.", (e) => e.type === "pozajmica"],
+  ["Povrat", (e) => e.type === "povrat"],
+  ["Trg. kartica", (e) => e.type === "trgovina" && e.pay === "kartica"],
+  ["Trg. gotovina", (e) => e.type === "trgovina" && e.pay !== "kartica"],
+  ["Manjak", (e) => e.type === "manjak"],
+  ["Višak", (e) => e.type === "visak"],
+  ["Bakšiš", (e) => e.type === "baksis"],
+];
+function KasaTab({ roster, me, meId, canEdit, flash }) {
+  const [ym, setYm] = useState(() => ymOf(new Date()));
+  const [list, setList] = useState([]);
+  const [day, setDay] = useState(null);
+  const [draft, setDraft] = useState({ type: "trgovina", pay: "gotovina" });
+  const canAdd = me && me !== "__viewer";
+  useEffect(() => { (async () => { const r = await sGet("kasa"); try { setList(r ? JSON.parse(r) : []); } catch (e) {} })(); }, []);
+  async function save(next) { setList(next); await sSet("kasa", JSON.stringify(next)); }
+  const nameOf = (id) => (roster.find((r) => r.id === id) || {}).name || "";
+  function add() {
+    const t = kasaDef(draft.type); const amount = num(draft.amount);
+    if (!t.noAmount && !(amount > 0)) { flash("upiši iznos"); return; }
+    if (t.person && !(draft.pid || meId)) { flash("odaberi osobu"); return; }
+    const e = { id: "k" + Date.now(), date: day, type: t.id, amount: t.noAmount ? 0 : amount, pid: t.person ? draft.pid || meId : "", pay: t.pay ? draft.pay || "gotovina" : "", note: (draft.note || "").trim(), photos: draft.photos || [], by: me, ts: Date.now() };
+    save([...list, e]); setDraft({ type: draft.type, pay: draft.pay }); flash("spremljeno ✓");
+  }
+  const upd = (id, patch) => save(list.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+  const days = monthDays(ym);
+  const inMonth = list.filter((e) => e.date && e.date.startsWith(ym));
+  const sumOf = (arr, f) => arr.filter(f).reduce((a, e) => a + num(e.amount), 0);
+  const balances = roster.map((p) => ({ p, d: sumOf(list, (e) => e.pid === p.id && e.type === "pozajmica") - sumOf(list, (e) => e.pid === p.id && e.type === "povrat") })).filter((x) => Math.abs(x.d) > 0.001);
+  const dayList = day ? list.filter((e) => e.date === day) : [];
+  const t = kasaDef(draft.type);
+  return (
+    <div className="pb-40">
+      <MonthNav ym={ym} setYm={setYm} />
+      <div className="px-4 py-2 text-[11px] text-stone-500">Tapni dan za unos. Iznosi u €. 📎 = broj slika (R1 računi i ostalo).</div>
+      <div className="overflow-x-auto mx-3 bg-white rounded-2xl border border-stone-200 shadow-sm">
+        <table className="text-xs border-collapse min-w-full" style={{ fontFamily: "system-ui,sans-serif" }}>
+          <thead><tr className="bg-stone-100"><th className="sticky left-0 bg-stone-100 px-2 py-2 text-left">Dan</th>{KASA_COLS.map(([l]) => <th key={l} className="px-2 py-2 whitespace-nowrap">{l}</th>)}<th className="px-2 py-2">📎</th></tr></thead>
+          <tbody>
+            {days.map((iso) => {
+              const es = inMonth.filter((e) => e.date === iso); const wd = (parseIso(iso).getDay() + 6) % 7; const ph = es.reduce((a, e) => a + (e.photos || []).length, 0);
+              return (
+                <tr key={iso} onClick={() => setDay(iso)} className="border-t border-stone-100 active:bg-stone-100 cursor-pointer">
+                  <td className="sticky left-0 bg-white px-2 py-1.5 whitespace-nowrap">{dd(iso)} {DAYS[wd]}</td>
+                  {KASA_COLS.map(([l, f]) => { const v = sumOf(es, f); return <td key={l} className="px-2 py-1.5 text-right whitespace-nowrap">{v ? money(v) : <span className="text-stone-300">·</span>}</td>; })}
+                  <td className="px-2 py-1.5 text-center">{ph || ""}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot><tr className="border-t border-stone-300 bg-stone-50 font-bold"><td className="sticky left-0 bg-stone-50 px-2 py-2">Ukupno</td>{KASA_COLS.map(([l, f]) => <td key={l} className="px-2 py-2 text-right whitespace-nowrap">{money(sumOf(inMonth, f))}</td>)}<td /></tr></tfoot>
+        </table>
+      </div>
+      <div className="mx-3 mt-3 bg-white rounded-2xl border border-stone-200 p-4 shadow-sm">
+        <div className="display font-bold mb-1">Pozajmice — tko još duguje kasi</div>
+        {balances.length === 0 ? <div className="text-sm text-stone-400">Nitko ne duguje.</div> :
+          balances.map(({ p, d }) => <div key={p.id} className="flex justify-between text-sm"><span>{p.name}</span><span className={d > 0 ? "text-red-600 font-bold" : "text-emerald-700"}>{d > 0 ? `duguje ${eur(d)}` : `preplatio ${eur(-d)}`}</span></div>)}
+      </div>
+
+      {day && (
+        <div className="fixed inset-0 z-30 flex items-end" onClick={() => setDay(null)}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div className="relative w-full bg-white rounded-t-3xl max-h-[85vh] overflow-y-auto p-4" onClick={(e) => e.stopPropagation()} style={{ fontFamily: "system-ui,sans-serif" }}>
+            <div className="flex items-center justify-between mb-3"><div className="display font-bold">{DAYS_LONG[dayIdxOf(day)]} {shortHR(parseIso(day))}</div><button onClick={() => setDay(null)} className="text-stone-400 text-xl px-2">✕</button></div>
+            {dayList.length === 0 && <div className="text-sm text-stone-400 mb-3">Nema unosa za ovaj dan.</div>}
+            {dayList.map((e) => {
+              const mine = canEdit || e.by === me;
+              return (
+                <div key={e.id} className="border border-stone-200 rounded-xl p-3 mb-2">
+                  <div className="flex justify-between text-sm">
+                    <span><b>{kasaDef(e.type).label}</b>{e.pay ? ` · ${e.pay}` : ""}{e.pid ? ` · ${nameOf(e.pid)}` : ""}</span>
+                    {!kasaDef(e.type).noAmount && <b>{eur(num(e.amount))}</b>}
+                  </div>
+                  {e.note && <div className="text-xs text-stone-500 mt-0.5">{e.note}</div>}
+                  <div className="text-[10px] text-stone-400 mt-0.5">upisao/la: {e.by}</div>
+                  <div className="mt-2 flex items-end justify-between gap-2">
+                    <Photos ids={e.photos} canEdit={mine} label="račun" onChange={(ph) => upd(e.id, { photos: ph })} />
+                    {mine && <button onClick={() => { if (confirm("Obrisati unos?")) save(list.filter((x) => x.id !== e.id)); }} className="text-xs text-red-500">obriši</button>}
+                  </div>
+                </div>
+              );
+            })}
+            {canAdd ? (
+              <div className="border-t border-stone-200 pt-3 mt-3 space-y-2">
+                <div className="text-[11px] uppercase tracking-wide text-stone-400">Novi unos</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {KASA_TYPES.map((k) => <button key={k.id} onClick={() => setDraft({ ...draft, type: k.id })} className={`text-xs px-2.5 py-1.5 rounded-lg border ${draft.type === k.id ? "bg-stone-800 text-white border-stone-800" : "bg-white border-stone-300"}`}>{k.label}</button>)}
+                </div>
+                {t.person && <select value={draft.pid || meId || ""} onChange={(e) => setDraft({ ...draft, pid: e.target.value })} className="w-full border border-stone-300 rounded-lg px-2 py-2 text-sm"><option value="">tko</option>{roster.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}
+                {t.pay && (
+                  <div className="flex gap-2">{["gotovina", "kartica"].map((m) => <button key={m} onClick={() => setDraft({ ...draft, pay: m })} className={`flex-1 py-2 rounded-lg text-sm border ${draft.pay === m ? "bg-stone-800 text-white border-stone-800" : "border-stone-300"}`}>{m === "kartica" ? "💳 kartica" : "💶 gotovina"}</button>)}</div>
+                )}
+                {!t.noAmount && <input value={draft.amount || ""} onChange={(e) => setDraft({ ...draft, amount: e.target.value })} inputMode="decimal" placeholder="iznos €" className="w-full border border-stone-300 rounded-lg px-3 py-2 text-sm" />}
+                <input value={draft.note || ""} onChange={(e) => setDraft({ ...draft, note: e.target.value })} placeholder="napomena (npr. Konzum, mlijeko)" className="w-full border border-stone-300 rounded-lg px-3 py-2 text-sm" />
+                <Photos ids={draft.photos} canEdit label={draft.type === "trgovina" ? "R1 račun" : "slikaj"} onChange={(ph) => setDraft({ ...draft, photos: ph })} />
+                <button onClick={add} className="w-full bg-amber-500 text-stone-900 font-bold py-3 rounded-xl text-sm">Spremi</button>
+              </div>
+            ) : <div className="text-xs text-stone-400">Za unos se prijavi svojim imenom.</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ---------- setup + bootstrap ----------
 function Setup({ onReady }) {
