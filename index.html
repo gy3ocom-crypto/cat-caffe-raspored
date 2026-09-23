@@ -211,7 +211,7 @@ function App() {
   const [status, setStatus] = useState("");
   const [lastSync, setLastSync] = useState(null);
   const [picker, setPicker] = useState(null);
-  const [adding, setAdding] = useState(null);
+  const [extraSlots, setExtraSlots] = useState([]);
   const [leaveDraft, setLeaveDraft] = useState({});
   const [swapDraft, setSwapDraft] = useState({ mutual: false });
   const [expanded, setExpanded] = useState(null);
@@ -262,13 +262,25 @@ function App() {
   function togglePerson(dayIdx, itemId, pid) {
     editItems(dayIdx, (items) => { const it = items.find((x) => x.id === itemId); if (!it) return; const at = it.people.indexOf(pid); if (at >= 0) it.people.splice(at, 1); else it.people.push(pid); });
   }
-  function addItem(dayIdx, typeId, iso) {
-    const t = typeDef(typeId); const id = newItemId();
-    editItems(dayIdx, (items) => [...items, { id, type: t.id, label: "", from: t.from, to: t.to, note: "", people: [] }].sort((a, b) => (mins(a.from) ?? 9999) - (mins(b.from) ?? 9999)));
-    setAdding(null); setPicker({ day: dayIdx, item: id, iso });
+  // tap na polje tablice: otvori postojeću stavku ili napravi novu za taj termin
+  function openCell(dayIdx, slot, item, iso) {
+    if (item) { setPicker({ day: dayIdx, item: item.id, iso }); return; }
+    const t = TYPES.find((x) => x.from === slot[0] && x.to === slot[1]); const id = newItemId();
+    editItems(dayIdx, (items) => [...items, { id, type: t ? t.id : "O", label: slot[2] || "", from: slot[0], to: slot[1], note: "", people: [] }]);
+    setPicker({ day: dayIdx, item: id, iso });
+  }
+  function addSlot() {
+    const sl = parseSlot(prompt("Novi termin, npr. 14-20 ili 19-22 kviz") || "");
+    if (!sl) return;
+    setExtraSlots([...extraSlots, sl]);
   }
   function updateItem(dayIdx, itemId, patch) { editItems(dayIdx, (items) => items.map((x) => (x.id === itemId ? { ...x, ...patch } : x))); }
   function removeItem(dayIdx, itemId) { editItems(dayIdx, (items) => items.filter((x) => x.id !== itemId)); setPicker(null); }
+  function closePicker() {
+    const it = picker && (week[picker.day] || []).find((x) => x.id === picker.item);
+    if (it && !it.people.length && !it.note) editItems(picker.day, (items) => items.filter((x) => x.id !== it.id));
+    setPicker(null);
+  }
   async function copyPrevWeek() {
     if (!canEdit) return;
     const has = Object.values(week).some((d) => d.length);
@@ -425,7 +437,7 @@ function App() {
   return (
     <div className="min-h-screen bg-stone-50 text-stone-800" style={{ fontFamily: "Georgia,'Times New Roman',serif" }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Patrick+Hand&display=swap');
         .display{font-family:'Fraunces',Georgia,serif}
         body{-webkit-tap-highlight-color:transparent}
         .print-area{display:none}
@@ -453,7 +465,7 @@ function App() {
           </div>
           <div className="flex gap-2 overflow-x-auto pb-1">
             <TabBtn id="raspored" label="Raspored" /><TabBtn id="zamjene" label="Zamjene" />
-            <TabBtn id="sati" label="Sati" /><TabBtn id="kasa" label="Kasa" />
+            <TabBtn id="sati" label="Sati" /><TabBtn id="kasa" label="Blagajna" />
             <TabBtn id="godisnji" label="Godišnji" /><TabBtn id="tim" label="Tim" /><TabBtn id="upute" label="Upute" />
           </div>
         </div>
@@ -481,51 +493,10 @@ function App() {
               </div>
 
               <div className="px-3 py-3 space-y-3 pb-40">
-                {DAYS.map((d, i) => {
-                  const date = addDays(weekStart, i); const iso = key(date);
-                  const h = holidayFor(iso); const fer = isFerije(iso); const closed = h && h.closed;
-                  return (
-                    <div key={i} className="bg-white rounded-2xl border border-stone-200 overflow-hidden shadow-sm">
-                      <div className="px-4 py-2 bg-stone-100 flex items-baseline justify-between"><span className="display font-bold">{DAYS_LONG[i]}</span><span className="text-xs text-stone-500">{shortHR(date)}</span></div>
-                      {(h || fer) && (
-                        <div className="px-4 py-1.5 flex flex-wrap gap-1.5 text-[11px]">
-                          {h && <span className={`px-2 py-0.5 rounded-full ${h.closed ? "bg-red-600 text-white" : "bg-emerald-600 text-white"}`}>★ {h.name}{h.closed ? " · ZATVORENO" : " · +50%"}</span>}
-                          {fer && <span className="px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">školske ferije</span>}
-                        </div>
-                      )}
-                      {closed ? <div className="px-4 py-4 text-center text-red-500 text-sm">Kafić zatvoren — neradni dan</div> : (
-                        <div className="divide-y divide-stone-100">
-                          {week[i].length === 0 && !canEdit && <div className="px-4 py-3 text-stone-300 text-sm">—</div>}
-                          {week[i].map((it) => {
-                            const t = typeDef(it.type);
-                            const cell = (
-                              <span className="flex items-start gap-3 px-4 py-3 w-full">
-                                <span className={`text-[11px] font-semibold px-2 py-1 rounded-md border whitespace-nowrap ${t.color}`}>{itemLabel(it)}{itemTime(it) && <><br /><span className="font-normal">{itemTime(it)}</span></>}</span>
-                                <span className="flex flex-wrap gap-1.5 pt-0.5 flex-1">
-                                  {it.people.length === 0 ? <span className="text-stone-300 text-sm">{canEdit ? "+ dodaj ljude" : "—"}</span> :
-                                    it.people.map((pid) => { const lv = onLeave(pid, iso); return (
-                                      <span key={pid} className={`text-xs px-2 py-1 rounded-full ${lv ? "bg-amber-200 text-amber-900 line-through" : roleOf(pid) === "stalni" ? "bg-stone-800 text-white" : "bg-stone-200 text-stone-700"}`}>{nameOf(pid)}{lv ? " (G.O.)" : ""}</span>); })}
-                                  {it.note && <span className="w-full text-[11px] text-stone-500">{it.note}</span>}
-                                </span>
-                              </span>
-                            );
-                            return canEdit
-                              ? <button key={it.id} onClick={() => setPicker({ day: i, item: it.id, iso })} className="w-full text-left active:bg-stone-50">{cell}</button>
-                              : <div key={it.id}>{cell}</div>;
-                          })}
-                          {canEdit && (adding === i ? (
-                            <div className="px-4 py-3 flex flex-wrap gap-1.5">
-                              {TYPES.map((t) => <button key={t.id} onClick={() => addItem(i, t.id, iso)} className={`text-xs px-2.5 py-1.5 rounded-lg border ${t.color}`}>{t.label}{t.from ? ` ${t.from.replace(":00", "")}–${t.to.replace(":00", "")}` : ""}</button>)}
-                              <button onClick={() => setAdding(null)} className="text-xs px-2.5 py-1.5 text-stone-400">odustani</button>
-                            </div>
-                          ) : (
-                            <button onClick={() => setAdding(i)} className="w-full text-left px-4 py-2.5 text-sm text-sky-700 active:bg-stone-50">+ dodaj smjenu / čišćenje / kviz…</button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                <div className="bg-white rounded-2xl border border-stone-200 p-2 pt-3 shadow-sm relative">
+                  <WeekGrid weekStart={weekStart} week={week} extraSlots={extraSlots} nameOf={nameOf} onLeave={onLeave} canEdit={canEdit} onCell={openCell} onAddSlot={addSlot} />
+                  {Array.from({ length: 7 }, (_, i) => holidayFor(key(addDays(weekStart, i)))).filter(Boolean).map((h) => <div key={h.date} className="text-[11px] mt-1 text-emerald-700">★ {shortHR(parseIso(h.date))} {h.name}{h.closed ? " — zatvoreno" : " — +50%"}</div>)}
+                </div>
 
                 <div className="bg-white rounded-2xl border border-stone-200 p-4 shadow-sm">
                   <div className="display font-bold mb-2">Pregled tjedna</div>
@@ -626,7 +597,7 @@ function App() {
           ) : tab === "sati" ? (
             <SatiTab roster={roster} canEdit={canEdit} meId={idOfName(me)} leave={leave} flash={flash} />
           ) : tab === "kasa" ? (
-            <KasaTab roster={roster} me={me} meId={idOfName(me)} canEdit={canEdit} flash={flash} />
+            <BlagajnaTab roster={roster} me={me} meId={idOfName(me)} canEdit={canEdit} flash={flash} />
           ) : tab === "tim" ? (
             <div className="px-3 py-3 space-y-2 pb-40">
               {roster.map((p) => {
@@ -675,9 +646,9 @@ function App() {
               <Section title="PIN">Svatko ima svoj PIN. Prvi put kad odabereš svoje ime, postaviš PIN (min. 4 znamenke); idući put ga upisuješ za ulaz. Tako se prijava i potvrda zamjena vežu na stvarnu osobu. Ako netko zaboravi PIN, Robert ili Vedrana ga resetiraju u tabu Tim (osoba postavi novi pri sljedećem ulazu). Napomena: PIN je interna brava za tim, ne i jaka lozinka.</Section>
               <Section title="Admini">Raspored, godišnji i članove tima uređuju <b>Robert</b> i <b>Vedrana</b>. Ostali vide raspored i mogu pisati napomene te tražiti/potvrđivati zamjene.</Section>
               <Section title="Kako se koristi">
-                <b>Raspored</b> — listaj tjedne strelicama. Admin svaki dan dodaje što treba: prijepodne, popodne, cijeli dan, međusmjenu, čišćenje, kviz ili nešto svoje. Svakoj stavci može promijeniti vrijeme, dodati napomenu i staviti jednu ili više osoba. <b>Kopiraj prošli tjedan</b> prepiše prošli tjedan kao početak. Tipka <b>🖨 Printaj</b> ispisuje tjedan.<br />
+                <b>Raspored</b> — tablica kao papirnati raspored: dani u stupcima, termini (11–16h, 11–13h, 16–22h…) u redovima. Listaj tjedne strelicama. Admin tapne polje i odabere ljude; "+ dodaj termin" doda novi red (npr. 14–20 ili 19–22 kviz). <b>Kopiraj prošli tjedan</b> prepiše prošli tjedan kao početak. Tipka <b>🖨 Printaj</b> ispisuje tjedan.<br />
                 <b>Sati</b> — mjesečna tablica: sati svakog dana po osobi, sami se zbrajaju iz rasporeda. Nedjelja i blagdan +50%, bolovanje s doznakom 70%, bez doznake 0%. Admin upisuje bolovanja (i slika doznaku) i satnicu u tabu Tim, pa se vidi i iznos.<br />
-                <b>Kasa</b> — tablica za svaki dan: pozajmice iz kase i povrati, plaćanja u trgovini (kartica/gotovina), manjak, višak, bakšiš. Uz svaki unos možeš slikati R1 račun ili drugi dokument. Dolje piše tko još duguje kasi.<br />
+                <b>Blagajna</b> — tablica za svaki dan: gotovina, kartice i ukupno, manjak, višak, bakšiš, pozajmice iz blagajne i povrati, plaćanja u trgovini. Uz unos možeš slikati R1 račun ili drugi dokument. Dolje piše tko još duguje blagajni.<br />
                 <b>Zamjene</b> — bilo tko zatraži zamjenu (tko daje, koji dan, tko preuzima; predaje se sve što ta osoba ima taj dan). Čim druga strana tapne <b>Potvrđujem</b>, raspored se sam mijenja — bez admina.<br />
                 <b>Godišnji</b> — 20 radnih dana po stalnom; admin dodaje raspon datuma. Tko je na G.O. prikazan je precrtano.<br />
                 <b>Tim</b> — kontakt, email i sanitarna knjižica (izdana / vrijedi do). App upozorava kad sanitarna ističe (≤30 dana) ili je istekla.
@@ -694,36 +665,21 @@ function App() {
 
       {/* ===== PRINT AREA ===== */}
       <div className="print-area">
-        <h2 style={{ margin: "0 0 2px" }}>Cat Cafe Zagreb — Tjedni raspored</h2>
-        <div style={{ fontSize: 13, marginBottom: 10 }}>{shortHR(weekStart)} – {shortHR(addDays(weekStart, 6))} 2026</div>
-        <table className="pt">
-          <thead><tr><th>Dan</th><th>Raspored</th></tr></thead>
-          <tbody>
-            {DAYS.map((d, i) => {
-              const iso = key(addDays(weekStart, i)); const h = holidayFor(iso);
-              if (h && h.closed) return <tr key={i}><td>{DAYS_LONG[i]} {shortHR(addDays(weekStart, i))}</td><td style={{ textAlign: "center" }}>ZATVORENO — {h.name}</td></tr>;
-              const names = (it) => it.people.map((pid) => nameOf(pid) + (onLeave(pid, iso) ? " (G.O.)" : "")).join(", ");
-              return <tr key={i}><td>{DAYS_LONG[i]} {shortHR(addDays(weekStart, i))}{h ? ` ★+50%` : ""}</td><td>{week[i].map((it) => <div key={it.id}><b>{itemLabel(it)} {itemTime(it)}</b>: {names(it) || "—"}{it.note ? ` (${it.note})` : ""}</div>)}</td></tr>;
-            })}
-          </tbody>
-        </table>
+        <h2 style={{ margin: "0 0 8px" }}>Cat Cafe Zagreb 🐈‍⬛</h2>
+        <WeekGrid weekStart={weekStart} week={week} extraSlots={[]} nameOf={nameOf} onLeave={onLeave} canEdit={false} print />
         {notes && <div style={{ marginTop: 12, fontSize: 12 }}><b>Napomene:</b> {notes}</div>}
       </div>
 
       {/* picker */}
       {picker && pickItem && (
-        <div className="fixed inset-0 z-30 flex items-end" onClick={() => setPicker(null)}>
+        <div className="fixed inset-0 z-30 flex items-end" onClick={closePicker}>
           <div className="absolute inset-0 bg-black/40" />
           <div className="relative w-full bg-white rounded-t-3xl max-h-[75vh] overflow-y-auto p-4" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-3"><div className="display font-bold">{DAYS_LONG[picker.day]} · {itemLabel(pickItem)} {itemTime(pickItem)}</div><button onClick={() => setPicker(null)} className="text-stone-400 text-xl px-2">✕</button></div>
+            <div className="flex items-center justify-between mb-3"><div className="display font-bold">{DAYS_LONG[picker.day]} {shortHR(parseIso(picker.iso))} · {hh(pickItem.from)}–{hh(pickItem.to)}h{pickItem.label ? ` ${pickItem.label}` : ""}</div><button onClick={closePicker} className="text-stone-400 text-xl px-2">✕</button></div>
             <div className="grid grid-cols-2 gap-2 mb-2">
-              <div className="col-span-2"><label className="text-[11px] text-stone-400">Vrsta</label>
-                <select value={pickItem.type} onChange={(e) => { const t = typeDef(e.target.value); updateItem(picker.day, pickItem.id, { type: t.id, label: "", from: t.from || pickItem.from, to: t.to || pickItem.to }); }} className="w-full border border-stone-300 rounded-lg px-2 py-2 text-sm">
-                  {TYPES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
-                </select></div>
               <div><label className="text-[11px] text-stone-400">Od</label><input type="time" value={pickItem.from} onChange={(e) => updateItem(picker.day, pickItem.id, { from: e.target.value })} className="w-full border border-stone-300 rounded-lg px-2 py-2 text-sm" /></div>
               <div><label className="text-[11px] text-stone-400">Do</label><input type="time" value={pickItem.to} onChange={(e) => updateItem(picker.day, pickItem.id, { to: e.target.value })} className="w-full border border-stone-300 rounded-lg px-2 py-2 text-sm" /></div>
-              <div className="col-span-2"><Field key={pickItem.id + "l"} label="Naziv (ako želiš svoj, npr. Rođendan, Inventura)" value={pickItem.label} onSave={(v) => updateItem(picker.day, pickItem.id, { label: v.trim() })} /></div>
+              <div className="col-span-2"><Field key={pickItem.id + "l"} label="Naziv (nije obavezno, npr. kviz, čišćenje, rođendan)" value={pickItem.label} onSave={(v) => updateItem(picker.day, pickItem.id, { label: v.trim() })} /></div>
               <div className="col-span-2"><Field key={pickItem.id + "n"} label="Napomena" value={pickItem.note} onSave={(v) => updateItem(picker.day, pickItem.id, { note: v.trim() })} /></div>
             </div>
             <div className="text-[11px] uppercase tracking-wide text-stone-400 mb-1 mt-3">Tko radi</div>
@@ -739,8 +695,8 @@ function App() {
               </div>
             ); })}
             <div className="flex gap-2 mt-2">
-              <button onClick={() => { if (confirm("Obrisati " + itemLabel(pickItem) + "?")) removeItem(picker.day, pickItem.id); }} className="px-4 bg-red-50 text-red-700 border border-red-200 py-3 rounded-xl text-sm">Obriši</button>
-              <button onClick={() => setPicker(null)} className="flex-1 bg-stone-100 py-3 rounded-xl text-sm font-semibold">Gotovo</button>
+              <button onClick={() => { if (confirm("Obrisati ovu smjenu?")) removeItem(picker.day, pickItem.id); }} className="px-4 bg-red-50 text-red-700 border border-red-200 py-3 rounded-xl text-sm">Obriši</button>
+              <button onClick={closePicker} className="flex-1 bg-stone-100 py-3 rounded-xl text-sm font-semibold">Gotovo</button>
             </div>
           </div>
         </div>
@@ -764,6 +720,74 @@ function Section({ title, children }) {
   return <div className="bg-white rounded-2xl border border-stone-200 p-4 shadow-sm"><div className="display font-bold mb-1">{title}</div><div className="text-stone-700">{children}</div></div>;
 }
 
+
+// ---------- tjedni raspored kao tablica (kao papirnati: dani u stupcima, termini u redovima) ----------
+const BASE_SLOTS = [["11:00", "16:00", ""], ["11:00", "13:00", ""], ["16:00", "22:00", ""]];
+const slotKey = (s) => `${s[0]}|${s[1]}|${s[2] || ""}`;
+const hh = (t) => (t || "").replace(/^0/, "").replace(":00", "");
+function parseSlot(txt) {
+  const m = /^\s*(\d{1,2})(?:[:.](\d{2}))?\s*[-–]\s*(\d{1,2})(?:[:.](\d{2}))?\s*h?\s*(.*)$/.exec(txt || "");
+  if (!m) return null;
+  const t = (h, mi) => `${String(h).padStart(2, "0")}:${mi || "00"}`;
+  return [t(m[1], m[2]), t(m[3], m[4]), (m[5] || "").trim()];
+}
+function WeekGrid({ weekStart, week, extraSlots, nameOf, onLeave, canEdit, onCell, onAddSlot, print }) {
+  const slots = [...BASE_SLOTS];
+  const seen = new Set(slots.map(slotKey));
+  const more = [];
+  [...Object.values(week).flat().map((it) => [it.from, it.to, it.label || ""]), ...(extraSlots || [])].forEach((s) => { const k = slotKey(s); if (!seen.has(k)) { seen.add(k); more.push(s); } });
+  more.sort((a, b) => (mins(a[0]) ?? 9999) - (mins(b[0]) ?? 9999) || (mins(b[1]) ?? 0) - (mins(a[1]) ?? 0));
+  slots.push(...more);
+  const bd = print ? "1px solid #000" : "1.5px solid #1c1917";
+  return (
+    <div className="paper bg-white text-stone-900" style={{ fontFamily: "'Patrick Hand',system-ui,sans-serif" }}>
+      <table className="w-full" style={{ borderCollapse: "collapse", tableLayout: "fixed" }}>
+        <thead>
+          <tr>
+            <th style={{ width: print ? 90 : 40 }} className="text-left align-bottom pb-1 text-[13px] leading-tight font-normal">{!print && <div className="text-lg leading-none mb-0.5" aria-hidden="true">🐈‍⬛</div>}{shortHR(weekStart).replace(/^0/, "").replace(".0", ".")}–<br />{shortHR(addDays(weekStart, 6)).replace(/^0/, "").replace(".0", ".")}</th>
+            {DAYS.map((d, i) => {
+              const iso = key(addDays(weekStart, i)); const h = holidayFor(iso);
+              return <th key={i} style={{ border: bd }} className={`py-1 text-[12px] font-normal uppercase leading-tight ${h ? (h.closed ? "bg-red-100" : "bg-emerald-50") : ""}`}>{d}<div className="text-[10px] text-stone-500 normal-case">{shortHR(addDays(weekStart, i))}{h ? " ★" : ""}</div></th>;
+            })}
+          </tr>
+        </thead>
+        <tbody>
+          {slots.map((sl) => {
+            const k = slotKey(sl);
+            return (
+              <tr key={k}>
+                <td className="text-[12px] leading-tight pr-0.5 align-middle">{hh(sl[0])}–{hh(sl[1])}h{sl[2] && <div className="text-[11px] text-stone-500">{sl[2]}</div>}</td>
+                {DAYS.map((d, i) => {
+                  const iso = key(addDays(weekStart, i)); const h = holidayFor(iso);
+                  const items = week[i].filter((it) => slotKey([it.from, it.to, it.label || ""]) === k);
+                  const closed = h && h.closed;
+                  const body = closed ? <span className="text-[10px] text-red-500">zatv.</span> : items.map((it) => (
+                    <div key={it.id}>
+                      {it.people.map((pid) => { const nm = nameOf(pid); return <div key={pid} style={{ fontSize: print ? 14 : nm.length > 7 ? 11 : nm.length > 5 ? 12.5 : 14, whiteSpace: "nowrap", letterSpacing: nm.length > 7 ? -0.3 : 0 }} className={`leading-[1.15] overflow-hidden ${onLeave(pid, iso) ? "line-through text-amber-700" : ""}`}>{nm}</div>; })}
+                      {it.note && <div className="text-[10px] text-stone-500 leading-tight">{it.note}</div>}
+                    </div>
+                  ));
+                  return (
+                    <td key={i} style={{ border: bd, height: print ? 44 : 50 }} className={`text-center align-middle px-0 py-0.5 text-[13px] overflow-hidden ${closed ? "bg-stone-100" : ""}`}>
+                      {canEdit && !closed && !print ? <button onClick={() => onCell(i, sl, items[0], iso)} className="w-full h-full min-h-[44px] active:bg-amber-50">{items.some((it) => it.people.length || it.note) ? body : <span className="text-stone-300 text-lg">+</span>}</button> : body}
+                    </td>
+                  );
+                })}
+              </tr>
+            );
+          })}
+          {!print && (
+            <tr>
+              <td />
+              {DAYS.map((d, i) => <td key={i} style={{ border: bd, height: 40 }} />)}
+            </tr>
+          )}
+        </tbody>
+      </table>
+      {canEdit && !print && <button onClick={onAddSlot} className="mt-2 text-[13px] text-sky-700" style={{ fontFamily: "system-ui,sans-serif" }}>+ dodaj termin (npr. 14–20, 19–22 kviz)</button>}
+    </div>
+  );
+}
 
 // ---------- slike (R1 računi, doznake…) — spremaju se na ovaj uređaj ----------
 function photoDb() {
@@ -974,34 +998,38 @@ function SatiTab({ roster, canEdit, meId, leave, flash }) {
   );
 }
 
-// ---------- KASA: pozajmice, povrati, trgovina, manjak/višak, bakšiš, računi ----------
+// ---------- BLAGAJNA: promet (gotovina/kartice), manjak, višak, bakšiš; pozajmice, povrati, trgovina, računi ----------
 const KASA_TYPES = [
-  { id: "pozajmica", label: "Pozajmica iz kase", person: true },
-  { id: "povrat", label: "Povrat u kasu", person: true },
+  { id: "pozajmica", label: "Pozajmica iz blagajne", person: true },
+  { id: "povrat", label: "Povrat u blagajnu", person: true },
   { id: "trgovina", label: "Plaćanje u trgovini", pay: true },
-  { id: "manjak", label: "Manjak" },
-  { id: "visak", label: "Višak" },
-  { id: "baksis", label: "Bakšiš", pay: true },
   { id: "dokument", label: "Samo dokument / račun", noAmount: true },
 ];
 const kasaDef = (id) => KASA_TYPES.find((t) => t.id === id) || KASA_TYPES[KASA_TYPES.length - 1];
-const KASA_COLS = [
-  ["Pozajm.", (e) => e.type === "pozajmica"],
-  ["Povrat", (e) => e.type === "povrat"],
-  ["Trg. kartica", (e) => e.type === "trgovina" && e.pay === "kartica"],
-  ["Trg. gotovina", (e) => e.type === "trgovina" && e.pay !== "kartica"],
-  ["Manjak", (e) => e.type === "manjak"],
-  ["Višak", (e) => e.type === "visak"],
-  ["Bakšiš", (e) => e.type === "baksis"],
-];
-function KasaTab({ roster, me, meId, canEdit, flash }) {
+const DAY_FIELDS = [["got", "Gotovina"], ["kar", "Kartice"], ["manjak", "Manjak"], ["visak", "Višak"], ["baksis", "Bakšiš"]];
+function BlagajnaTab({ roster, me, meId, canEdit, flash }) {
   const [ym, setYm] = useState(() => ymOf(new Date()));
   const [list, setList] = useState([]);
+  const [days, setDays] = useState({});
   const [day, setDay] = useState(null);
+  const [dayDraft, setDayDraft] = useState({});
   const [draft, setDraft] = useState({ type: "trgovina", pay: "gotovina" });
   const canAdd = me && me !== "__viewer";
-  useEffect(() => { (async () => { const r = await sGet("kasa"); try { setList(r ? JSON.parse(r) : []); } catch (e) {} })(); }, []);
+  useEffect(() => {
+    (async () => {
+      const [r, d] = await Promise.all([sGet("kasa"), sGet("blagajna")]);
+      try { setList(r ? JSON.parse(r).filter((e) => KASA_TYPES.some((t) => t.id === e.type)) : []); } catch (e) {}
+      try { setDays(d ? JSON.parse(d) : {}); } catch (e) {}
+    })();
+  }, []);
   async function save(next) { setList(next); await sSet("kasa", JSON.stringify(next)); }
+  function openDay(iso) { setDay(iso); const d = days[iso] || {}; setDayDraft(Object.fromEntries(DAY_FIELDS.map(([k]) => [k, d[k] ? String(d[k]).replace(".", ",") : ""]))); }
+  async function saveDay() {
+    if (!canAdd) return;
+    const rec = Object.fromEntries(DAY_FIELDS.map(([k]) => [k, num(dayDraft[k])]));
+    const next = { ...days, [day]: { ...rec, by: me, ts: Date.now() } };
+    setDays(next); await sSet("blagajna", JSON.stringify(next)); flash("blagajna ✓");
+  }
   const nameOf = (id) => (roster.find((r) => r.id === id) || {}).name || "";
   function add() {
     const t = kasaDef(draft.type); const amount = num(draft.amount);
@@ -1011,36 +1039,50 @@ function KasaTab({ roster, me, meId, canEdit, flash }) {
     save([...list, e]); setDraft({ type: draft.type, pay: draft.pay }); flash("spremljeno ✓");
   }
   const upd = (id, patch) => save(list.map((x) => (x.id === id ? { ...x, ...patch } : x)));
-  const days = monthDays(ym);
+  const mdays = monthDays(ym);
   const inMonth = list.filter((e) => e.date && e.date.startsWith(ym));
   const sumOf = (arr, f) => arr.filter(f).reduce((a, e) => a + num(e.amount), 0);
+  const dv = (iso, k) => num((days[iso] || {})[k]);
+  const COLS = [
+    ["Gotovina", (iso) => dv(iso, "got")],
+    ["Kartice", (iso) => dv(iso, "kar")],
+    ["Ukupno", (iso) => dv(iso, "got") + dv(iso, "kar"), true],
+    ["Manjak", (iso) => dv(iso, "manjak")],
+    ["Višak", (iso) => dv(iso, "visak")],
+    ["Bakšiš", (iso) => dv(iso, "baksis")],
+    ["Pozajm.", (iso) => sumOf(inMonth, (e) => e.date === iso && e.type === "pozajmica")],
+    ["Povrat", (iso) => sumOf(inMonth, (e) => e.date === iso && e.type === "povrat")],
+    ["Trgovina", (iso) => sumOf(inMonth, (e) => e.date === iso && e.type === "trgovina")],
+  ];
   const balances = roster.map((p) => ({ p, d: sumOf(list, (e) => e.pid === p.id && e.type === "pozajmica") - sumOf(list, (e) => e.pid === p.id && e.type === "povrat") })).filter((x) => Math.abs(x.d) > 0.001);
   const dayList = day ? list.filter((e) => e.date === day) : [];
   const t = kasaDef(draft.type);
+  const bd = "1.5px solid #1c1917";
+  const totalDraft = num(dayDraft.got) + num(dayDraft.kar);
   return (
     <div className="pb-40">
       <MonthNav ym={ym} setYm={setYm} />
-      <div className="px-4 py-2 text-[11px] text-stone-500">Tapni dan za unos. Iznosi u €. 📎 = broj slika (R1 računi i ostalo).</div>
-      <div className="overflow-x-auto mx-3 bg-white rounded-2xl border border-stone-200 shadow-sm">
-        <table className="text-xs border-collapse min-w-full" style={{ fontFamily: "system-ui,sans-serif" }}>
-          <thead><tr className="bg-stone-100"><th className="sticky left-0 bg-stone-100 px-2 py-2 text-left">Dan</th>{KASA_COLS.map(([l]) => <th key={l} className="px-2 py-2 whitespace-nowrap">{l}</th>)}<th className="px-2 py-2">📎</th></tr></thead>
+      <div className="px-4 py-2 text-[11px] text-stone-500">Tapni dan za unos prometa, manjka, viška, bakšiša i računa. Iznosi u €. 📎 = broj slika.</div>
+      <div className="overflow-x-auto mx-3 bg-white rounded-2xl border border-stone-200 shadow-sm p-2">
+        <table className="text-[12px] min-w-full" style={{ borderCollapse: "collapse", fontFamily: "system-ui,sans-serif" }}>
+          <thead><tr><th className="sticky left-0 bg-white px-2 py-1.5 text-left" style={{ border: bd }}>Dan</th>{COLS.map(([l, , strong]) => <th key={l} style={{ border: bd }} className={`px-2 py-1.5 whitespace-nowrap ${strong ? "bg-amber-50" : ""}`}>{l}</th>)}<th style={{ border: bd }} className="px-2">📎</th></tr></thead>
           <tbody>
-            {days.map((iso) => {
-              const es = inMonth.filter((e) => e.date === iso); const wd = (parseIso(iso).getDay() + 6) % 7; const ph = es.reduce((a, e) => a + (e.photos || []).length, 0);
+            {mdays.map((iso) => {
+              const wd = (parseIso(iso).getDay() + 6) % 7; const ph = inMonth.filter((e) => e.date === iso).reduce((a, e) => a + (e.photos || []).length, 0);
               return (
-                <tr key={iso} onClick={() => setDay(iso)} className="border-t border-stone-100 active:bg-stone-100 cursor-pointer">
-                  <td className="sticky left-0 bg-white px-2 py-1.5 whitespace-nowrap">{dd(iso)} {DAYS[wd]}</td>
-                  {KASA_COLS.map(([l, f]) => { const v = sumOf(es, f); return <td key={l} className="px-2 py-1.5 text-right whitespace-nowrap">{v ? money(v) : <span className="text-stone-300">·</span>}</td>; })}
-                  <td className="px-2 py-1.5 text-center">{ph || ""}</td>
+                <tr key={iso} onClick={() => openDay(iso)} className="active:bg-amber-50 cursor-pointer">
+                  <td className="sticky left-0 bg-white px-2 py-1.5 whitespace-nowrap" style={{ border: bd }}>{dd(iso)} {DAYS[wd]}</td>
+                  {COLS.map(([l, f, strong]) => { const v = f(iso); return <td key={l} style={{ border: bd }} className={`px-2 py-1.5 text-right whitespace-nowrap ${strong ? "bg-amber-50 font-bold" : ""} ${l === "Manjak" && v ? "text-red-600" : ""}`}>{v ? money(v) : ""}</td>; })}
+                  <td style={{ border: bd }} className="px-2 text-center">{ph || ""}</td>
                 </tr>
               );
             })}
           </tbody>
-          <tfoot><tr className="border-t border-stone-300 bg-stone-50 font-bold"><td className="sticky left-0 bg-stone-50 px-2 py-2">Ukupno</td>{KASA_COLS.map(([l, f]) => <td key={l} className="px-2 py-2 text-right whitespace-nowrap">{money(sumOf(inMonth, f))}</td>)}<td /></tr></tfoot>
+          <tfoot><tr className="font-bold bg-stone-100"><td className="sticky left-0 bg-stone-100 px-2 py-2" style={{ border: bd }}>Ukupno</td>{COLS.map(([l, f]) => <td key={l} style={{ border: bd }} className="px-2 py-2 text-right whitespace-nowrap">{money(mdays.reduce((a, iso) => a + f(iso), 0))}</td>)}<td style={{ border: bd }} /></tr></tfoot>
         </table>
       </div>
       <div className="mx-3 mt-3 bg-white rounded-2xl border border-stone-200 p-4 shadow-sm">
-        <div className="display font-bold mb-1">Pozajmice — tko još duguje kasi</div>
+        <div className="display font-bold mb-1">Pozajmice — tko još duguje blagajni</div>
         {balances.length === 0 ? <div className="text-sm text-stone-400">Nitko ne duguje.</div> :
           balances.map(({ p, d }) => <div key={p.id} className="flex justify-between text-sm"><span>{p.name}</span><span className={d > 0 ? "text-red-600 font-bold" : "text-emerald-700"}>{d > 0 ? `duguje ${eur(d)}` : `preplatio ${eur(-d)}`}</span></div>)}
       </div>
@@ -1048,9 +1090,20 @@ function KasaTab({ roster, me, meId, canEdit, flash }) {
       {day && (
         <div className="fixed inset-0 z-30 flex items-end" onClick={() => setDay(null)}>
           <div className="absolute inset-0 bg-black/40" />
-          <div className="relative w-full bg-white rounded-t-3xl max-h-[85vh] overflow-y-auto p-4" onClick={(e) => e.stopPropagation()} style={{ fontFamily: "system-ui,sans-serif" }}>
+          <div className="relative w-full bg-white rounded-t-3xl max-h-[88vh] overflow-y-auto p-4" onClick={(e) => e.stopPropagation()} style={{ fontFamily: "system-ui,sans-serif" }}>
             <div className="flex items-center justify-between mb-3"><div className="display font-bold">{DAYS_LONG[dayIdxOf(day)]} {shortHR(parseIso(day))}</div><button onClick={() => setDay(null)} className="text-stone-400 text-xl px-2">✕</button></div>
-            {dayList.length === 0 && <div className="text-sm text-stone-400 mb-3">Nema unosa za ovaj dan.</div>}
+            <div className="border border-stone-300 rounded-xl p-3 mb-3">
+              <div className="text-[11px] uppercase tracking-wide text-stone-400 mb-2">Blagajna</div>
+              <div className="grid grid-cols-2 gap-2">
+                {DAY_FIELDS.map(([k, label]) => (
+                  <label key={k} className={k === "baksis" ? "col-span-2" : ""}><span className="text-[11px] text-stone-500">{label} €</span>
+                    <input value={dayDraft[k] || ""} disabled={!canAdd} inputMode="decimal" onChange={(e) => setDayDraft({ ...dayDraft, [k]: e.target.value })} className="w-full border border-stone-300 rounded-lg px-2 py-2 text-sm disabled:bg-stone-50" /></label>
+                ))}
+              </div>
+              <div className="flex justify-between items-center mt-2 text-sm"><span>Ukupno (gotovina + kartice)</span><b>{eur(totalDraft)}</b></div>
+              {(days[day] || {}).by && <div className="text-[10px] text-stone-400">zadnje upisao/la: {days[day].by}</div>}
+              {canAdd && <button onClick={saveDay} className="w-full mt-2 bg-amber-500 text-stone-900 font-bold py-2.5 rounded-xl text-sm">Spremi blagajnu</button>}
+            </div>
             {dayList.map((e) => {
               const mine = canEdit || e.by === me;
               return (
@@ -1070,7 +1123,7 @@ function KasaTab({ roster, me, meId, canEdit, flash }) {
             })}
             {canAdd ? (
               <div className="border-t border-stone-200 pt-3 mt-3 space-y-2">
-                <div className="text-[11px] uppercase tracking-wide text-stone-400">Novi unos</div>
+                <div className="text-[11px] uppercase tracking-wide text-stone-400">Pozajmica, povrat, trgovina ili račun</div>
                 <div className="flex flex-wrap gap-1.5">
                   {KASA_TYPES.map((k) => <button key={k.id} onClick={() => setDraft({ ...draft, type: k.id })} className={`text-xs px-2.5 py-1.5 rounded-lg border ${draft.type === k.id ? "bg-stone-800 text-white border-stone-800" : "bg-white border-stone-300"}`}>{k.label}</button>)}
                 </div>
@@ -1081,7 +1134,7 @@ function KasaTab({ roster, me, meId, canEdit, flash }) {
                 {!t.noAmount && <input value={draft.amount || ""} onChange={(e) => setDraft({ ...draft, amount: e.target.value })} inputMode="decimal" placeholder="iznos €" className="w-full border border-stone-300 rounded-lg px-3 py-2 text-sm" />}
                 <input value={draft.note || ""} onChange={(e) => setDraft({ ...draft, note: e.target.value })} placeholder="napomena (npr. Konzum, mlijeko)" className="w-full border border-stone-300 rounded-lg px-3 py-2 text-sm" />
                 <Photos ids={draft.photos} canEdit label={draft.type === "trgovina" ? "R1 račun" : "slikaj"} onChange={(ph) => setDraft({ ...draft, photos: ph })} />
-                <button onClick={add} className="w-full bg-amber-500 text-stone-900 font-bold py-3 rounded-xl text-sm">Spremi</button>
+                <button onClick={add} className="w-full bg-stone-800 text-white font-bold py-3 rounded-xl text-sm">Dodaj</button>
               </div>
             ) : <div className="text-xs text-stone-400">Za unos se prijavi svojim imenom.</div>}
           </div>
