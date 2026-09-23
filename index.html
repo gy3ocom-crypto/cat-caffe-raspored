@@ -1,1 +1,692 @@
+<!DOCTYPE html>
+<html lang="hr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Cat Cafe · Raspored</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style> html,body,#root{height:100%} body{margin:0} </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useCallback } = React;
 
+
+// ---------- shared cloud storage (2 baze + auto-zamjena; radi izmedu uredaja/racuna) ----------
+let BLOB_ID = new URLSearchParams(location.search).get("b") || null;
+let PROVIDER = new URLSearchParams(location.search).get("p") || "kvdb";
+let DB = {};
+const PROVIDERS = {
+  kvdb: {
+    async create(init) {
+      const r = await fetch("https://kvdb.io/", { method: "POST" });
+      if (!r.ok) throw new Error("kvdb create");
+      const id = (await r.text()).trim();
+      if (!id || /\s/.test(id)) throw new Error("kvdb id");
+      await fetch("https://kvdb.io/" + id + "/db", { method: "PUT", body: JSON.stringify(init) });
+      return id;
+    },
+    async get(id) {
+      const r = await fetch("https://kvdb.io/" + id + "/db");
+      if (r.status === 404) return null;
+      if (!r.ok) throw new Error("kvdb get");
+      const t = await r.text();
+      return t ? JSON.parse(t) : null;
+    },
+    async put(id, obj) { await fetch("https://kvdb.io/" + id + "/db", { method: "PUT", body: JSON.stringify(obj) }); },
+  },
+  jb: {
+    async create(init) {
+      const r = await fetch("https://jsonblob.com/api/jsonBlob", { method: "POST", headers: { "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify(init) });
+      if (!r.ok) throw new Error("jb create");
+      const loc = r.headers.get("Location") || r.headers.get("location") || "";
+      const id = loc.split("/").filter(Boolean).pop();
+      if (!id) throw new Error("jb id");
+      return id;
+    },
+    async get(id) { const r = await fetch("https://jsonblob.com/api/jsonBlob/" + id); if (!r.ok) throw new Error("jb get"); return await r.json(); },
+    async put(id, obj) { await fetch("https://jsonblob.com/api/jsonBlob/" + id, { method: "PUT", headers: { "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify(obj) }); },
+  },
+};
+function prov() { return PROVIDERS[PROVIDER] || PROVIDERS.kvdb; }
+async function refreshDB() { if (!BLOB_ID) return; try { const d = await prov().get(BLOB_ID); if (d) DB = d; } catch (e) {} }
+async function persist() { if (!BLOB_ID) return; try { await prov().put(BLOB_ID, DB); } catch (e) {} }
+async function sGet(k) { return (DB && (k in DB)) ? DB[k] : null; }
+async function sSet(k, v) { try { DB[k] = v; await persist(); return true; } catch { return false; } }
+async function createStore(init) {
+  for (const p of ["kvdb", "jb"]) {
+    try { const id = await PROVIDERS[p].create(init); if (id) { PROVIDER = p; BLOB_ID = id; DB = init; return { id, p }; } } catch (e) {}
+  }
+  return null;
+}
+
+// ---------- constants ----------
+const DAYS = ["Pon", "Uto", "Sri", "Čet", "Pet", "Sub", "Ned"];
+const DAYS_LONG = ["Ponedjeljak", "Utorak", "Srijeda", "Četvrtak", "Petak", "Subota", "Nedjelja"];
+const WEEKEND_MIDDLE = [4, 5, 6];
+const ADMINS = ["Robert", "Vedrana"];
+const ROLES = [
+  { id: "stalni", label: "stalni", plural: "Stalni", leave: 20 },
+  { id: "student", label: "student", plural: "Studenti", leave: null },
+  { id: "učenik", label: "učenik", plural: "Učenici", leave: 0 },
+  { id: "vanjski", label: "vanjski suradnik", plural: "Vanjski suradnici", leave: 0 },
+];
+const roleDef = (id) => ROLES.find((r) => r.id === id) || ROLES[0];
+
+const SHIFTS = [
+  { id: "jutarnja", label: "Jutarnja", time: "08–15", color: "bg-amber-100 text-amber-900 border-amber-300" },
+  { id: "srednja", label: "Srednja", time: "13–21", color: "bg-sky-100 text-sky-900 border-sky-300" },
+  { id: "vecernja", label: "Večernja", time: "15–23", color: "bg-rose-100 text-rose-900 border-rose-300" },
+];
+
+const HOLIDAYS = [
+  { date: "2026-01-01", name: "Nova godina", closed: false },
+  { date: "2026-01-06", name: "Sveta tri kralja", closed: false },
+  { date: "2026-04-05", name: "Uskrs", closed: true },
+  { date: "2026-04-06", name: "Uskrsni ponedjeljak", closed: false },
+  { date: "2026-05-01", name: "Praznik rada", closed: false },
+  { date: "2026-05-30", name: "Dan državnosti", closed: false },
+  { date: "2026-06-04", name: "Tijelovo", closed: false },
+  { date: "2026-06-22", name: "Dan antifašističke borbe", closed: false },
+  { date: "2026-08-05", name: "Dan pobjede i dom. zahvalnosti", closed: false },
+  { date: "2026-08-15", name: "Velika Gospa", closed: false },
+  { date: "2026-11-01", name: "Svi sveti", closed: false },
+  { date: "2026-11-18", name: "Dan sjećanja · Vukovar", closed: false },
+  { date: "2026-12-25", name: "Božić", closed: true },
+  { date: "2026-12-26", name: "Sveti Stjepan", closed: false },
+  { date: "2027-01-01", name: "Nova godina", closed: false },
+  { date: "2027-01-06", name: "Sveta tri kralja", closed: false },
+];
+const FERIJE = [
+  ["2026-01-01", "2026-01-09"], ["2026-03-30", "2026-04-06"],
+  ["2026-06-15", "2026-09-06"], ["2026-12-24", "2027-01-06"],
+];
+
+const DEFAULT_ROSTER = [
+  ["Vedrana", "stalni"], ["Jana", "stalni"], ["Inoslav", "stalni"], ["Patricija", "stalni"],
+  ["Terra", "stalni"], ["Ivan", "stalni"], ["Agneza", "stalni"],
+  ["Nives", "student"], ["Ena", "student"], ["Jelena", "student"], ["Roko", "student"], ["Lucija", "student"],
+].map(([name, role], i) => ({ id: "p" + i, name, role, phone: "", email: "", sanIssued: "", sanExpiry: "" }));
+
+// ---------- date helpers (local time) ----------
+function key(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
+function parseIso(iso) { return new Date(iso + "T00:00:00"); }
+function mondayOf(d) { const x = new Date(d); const wd = (x.getDay() + 6) % 7; x.setDate(x.getDate() - wd); x.setHours(0, 0, 0, 0); return x; }
+function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
+function shortHR(d) { return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.`; }
+function dayIdxOf(iso) { return (parseIso(iso).getDay() + 6) % 7; }
+function holidayFor(iso) { return HOLIDAYS.find((h) => h.date === iso) || null; }
+function isFerije(iso) { return FERIJE.some(([a, b]) => iso >= a && iso <= b); }
+function datesBetween(a, b) { const o = []; let c = parseIso(a); const e = parseIso(b); while (c <= e) { o.push(key(c)); c = addDays(c, 1); } return o; }
+function emptyWeek() { const w = {}; for (let i = 0; i < 7; i++) w[i] = { jutarnja: [], srednja: [], vecernja: [] }; return w; }
+function safeWeek(raw) {
+  try { const w = JSON.parse(raw); const o = emptyWeek(); for (let i = 0; i < 7; i++) if (w[i]) { o[i].jutarnja = w[i].jutarnja || []; o[i].srednja = w[i].srednja || []; o[i].vecernja = w[i].vecernja || []; } return o; }
+  catch { return emptyWeek(); }
+}
+function daysTo(iso) { if (!iso) return null; return Math.round((parseIso(iso) - new Date(key(new Date()) + "T00:00:00")) / 86400000); }
+
+function App() {
+  const [me, setMe] = useState(null);
+  const [pins, setPins] = useState({});
+  const [pending, setPending] = useState(null);
+  const [pinIn, setPinIn] = useState("");
+  const [pinIn2, setPinIn2] = useState("");
+  const [pinErr, setPinErr] = useState("");
+  const [tab, setTab] = useState("raspored");
+  const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()));
+  const [roster, setRoster] = useState(DEFAULT_ROSTER);
+  const [week, setWeek] = useState(emptyWeek());
+  const [leave, setLeave] = useState({});
+  const [swaps, setSwaps] = useState([]);
+  const [notes, setNotes] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState("");
+  const [lastSync, setLastSync] = useState(null);
+  const [picker, setPicker] = useState(null);
+  const [leaveDraft, setLeaveDraft] = useState({});
+  const [swapDraft, setSwapDraft] = useState({ mutual: false });
+  const [expanded, setExpanded] = useState(null);
+  const [newName, setNewName] = useState("");
+  const [newRole, setNewRole] = useState("stalni");
+  const notesFocused = useRef(false);
+  const weekKey = key(weekStart);
+  const canEdit = ADMINS.includes(me);
+  const flash = (t) => { setStatus(t); setTimeout(() => setStatus(""), 1500); };
+
+  const loadAll = useCallback(async (silent) => {
+    if (!silent) setLoading(true);
+    await refreshDB();
+    const [r, w, n, l, s, pin] = await Promise.all([sGet("roster"), sGet(`week:${weekKey}`), sGet(`notes:${weekKey}`), sGet("leave"), sGet("swaps"), sGet("pins")]);
+    if (pin) { try { setPins(JSON.parse(pin)); } catch {} }
+    if (r) { try { setRoster(JSON.parse(r)); } catch {} } else if (!silent) await sSet("roster", JSON.stringify(DEFAULT_ROSTER));
+    setWeek(w ? safeWeek(w) : emptyWeek());
+    if (!notesFocused.current) setNotes(n || "");
+    if (l) { try { setLeave(JSON.parse(l)); } catch {} }
+    if (s) { try { setSwaps(JSON.parse(s)); } catch {} }
+    setLastSync(new Date());
+    if (!silent) setLoading(false);
+  }, [weekKey]);
+
+  useEffect(() => { loadAll(false); }, [loadAll]);
+  useEffect(() => { const t = setInterval(() => { if (!picker) loadAll(true); }, 12000); return () => clearInterval(t); }, [loadAll, picker]);
+
+  async function saveWeek(next) { setWeek(next); const ok = await sSet(`week:${weekKey}`, JSON.stringify(next)); flash(ok ? "spremljeno ✓" : "greška"); setLastSync(new Date()); }
+  async function saveRoster(next) { setRoster(next); await sSet("roster", JSON.stringify(next)); flash("tim ✓"); }
+  async function saveNotes() { const ok = await sSet(`notes:${weekKey}`, notes); flash(ok ? "napomene ✓" : "greška"); }
+  async function saveLeave(next) { setLeave(next); await sSet("leave", JSON.stringify(next)); flash("godišnji ✓"); }
+  async function saveSwaps(next) { setSwaps(next); await sSet("swaps", JSON.stringify(next)); }
+
+  const member = (id) => roster.find((r) => r.id === id) || {};
+  const nameOf = (id) => member(id).name || "?";
+  const roleOf = (id) => member(id).role || "";
+  const idOfName = (nm) => (roster.find((r) => r.name === nm) || {}).id || "";
+  const onLeave = (id, iso) => (leave[id] || []).includes(iso);
+
+  function togglePerson(dayIdx, shiftId, pid) {
+    if (!canEdit) return;
+    const next = JSON.parse(JSON.stringify(week));
+    const arr = next[dayIdx][shiftId]; const at = arr.indexOf(pid);
+    if (at >= 0) arr.splice(at, 1); else arr.push(pid);
+    saveWeek(next);
+  }
+
+  function conflicts(pid) { const o = []; for (let d = 0; d < 6; d++) if (week[d].vecernja.includes(pid) && week[d + 1].jutarnja.includes(pid)) o.push(d); return o; }
+  function holidayShifts(pid) { let c = 0; for (let i = 0; i < 7; i++) { const h = holidayFor(key(addDays(weekStart, i))); if (h && !h.closed) SHIFTS.forEach((s) => { if (week[i][s.id].includes(pid)) c++; }); } return c; }
+  const summary = roster.map((p) => { let c = 0; for (let i = 0; i < 7; i++) SHIFTS.forEach((s) => { if (week[i][s.id].includes(p.id)) c++; }); return { ...p, count: c, conflicts: conflicts(p.id), holiday: holidayShifts(p.id) }; });
+
+  function leaveUsed(pid) { return (leave[pid] || []).filter((iso) => { if (holidayFor(iso)) return false; return parseIso(iso).getDay() !== 0; }).length; }
+  function addLeave(pid) {
+    if (!canEdit) return;
+    const d = leaveDraft[pid] || {}; if (!d.od) return; const to = d.do || d.od; if (to < d.od) return;
+    const cur = new Set(leave[pid] || []); datesBetween(d.od, to).forEach((x) => cur.add(x));
+    saveLeave({ ...leave, [pid]: Array.from(cur).sort() }); setLeaveDraft({ ...leaveDraft, [pid]: {} });
+  }
+  function removeLeaveDate(pid, iso) { if (!canEdit) return; saveLeave({ ...leave, [pid]: (leave[pid] || []).filter((x) => x !== iso) }); }
+
+  function updateMember(id, field, val) { saveRoster(roster.map((r) => (r.id === id ? { ...r, [field]: val } : r))); }
+  function addPerson() { if (!canEdit) return; const nm = newName.trim(); if (!nm) return; saveRoster([...roster, { id: "x" + Date.now(), name: nm, role: newRole, phone: "", email: "", sanIssued: "", sanExpiry: "" }]); setNewName(""); }
+  function removePerson(id) {
+    if (!canEdit) return;
+    saveRoster(roster.filter((r) => r.id !== id));
+    const next = JSON.parse(JSON.stringify(week));
+    for (let i = 0; i < 7; i++) SHIFTS.forEach((s) => { next[i][s.id] = next[i][s.id].filter((x) => x !== id); });
+    saveWeek(next);
+  }
+
+  // ----- swaps (peer-confirmed, no admin) -----
+  async function editDate(iso, mut) {
+    const wk = key(mondayOf(parseIso(iso)));
+    const raw = await sGet(`week:${wk}`); const w = raw ? safeWeek(raw) : emptyWeek();
+    mut(w[dayIdxOf(iso)]); await sSet(`week:${wk}`, JSON.stringify(w));
+    if (wk === weekKey) setWeek(JSON.parse(JSON.stringify(w)));
+  }
+  function replaceIn(arr, a, b) { const i = arr.indexOf(a); if (i >= 0) arr.splice(i, 1); if (!arr.includes(b)) arr.push(b); }
+
+  async function applySwap(sw) {
+    await editDate(sw.fromDate, (day) => replaceIn(day[sw.fromShift], sw.fromPerson, sw.toPerson));
+    if (sw.mutual && sw.toDate && sw.toShift) await editDate(sw.toDate, (day) => replaceIn(day[sw.toShift], sw.toPerson, sw.fromPerson));
+  }
+  function createSwap() {
+    const d = swapDraft;
+    if (!d.fromPerson || !d.fromDate || !d.fromShift || !d.toPerson) { flash("ispuni sva polja"); return; }
+    if (d.fromPerson === d.toPerson) { flash("iste osobe"); return; }
+    const sw = {
+      id: "sw" + Date.now(), fromPerson: d.fromPerson, fromDate: d.fromDate, fromShift: d.fromShift,
+      toPerson: d.toPerson, mutual: !!d.mutual, toDate: d.mutual ? d.toDate : "", toShift: d.mutual ? d.toShift : "",
+      confirmFrom: true, confirmTo: false, status: "pending", ts: Date.now(),
+    };
+    saveSwaps([sw, ...swaps]);
+    setSwapDraft({ mutual: false });
+    flash("zahtjev poslan");
+  }
+  async function confirmSwap(id) {
+    const sw = swaps.find((x) => x.id === id); if (!sw) return;
+    await applySwap(sw);
+    saveSwaps(swaps.map((x) => (x.id === id ? { ...x, confirmTo: true, status: "done" } : x)));
+    flash("zamjena potvrđena ✓");
+  }
+  function rejectSwap(id) { saveSwaps(swaps.map((x) => (x.id === id ? { ...x, status: "rejected" } : x))); }
+  function deleteSwap(id) { saveSwaps(swaps.filter((x) => x.id !== id)); }
+
+  const isThisWeek = key(mondayOf(new Date())) === weekKey;
+  const printWeek = () => window.print();
+
+  async function savePins(next) { setPins(next); await sSet("pins", JSON.stringify(next)); }
+  function selectName(name) { setPinErr(""); setPinIn(""); setPinIn2(""); if (name === "__viewer") { setMe("__viewer"); return; } setPending(name); }
+  async function submitPin() {
+    const has = !!pins[pending];
+    if (has) {
+      if (pinIn === pins[pending]) { setMe(pending); setPending(null); }
+      else setPinErr("pogrešan PIN");
+    } else {
+      if (pinIn.length < 4) { setPinErr("PIN min. 4 znamenke"); return; }
+      if (pinIn !== pinIn2) { setPinErr("PIN se ne podudara"); return; }
+      await savePins({ ...pins, [pending]: pinIn });
+      setMe(pending); setPending(null);
+    }
+    setPinIn(""); setPinIn2("");
+  }
+  function logout() { setMe(null); setPending(null); setPinIn(""); setPinIn2(""); setPinErr(""); }
+  function resetMemberPin(name) { if (!canEdit) return; const n = { ...pins }; delete n[name]; savePins(n); flash("PIN resetiran"); }
+
+  // ---------- identity / PIN gate ----------
+  if (!me) {
+    const names = ["Robert", ...roster.map((p) => p.name).filter((n) => n !== "Robert")];
+    const hasPin = pending && !!pins[pending];
+    return (
+      <div className="min-h-screen bg-stone-900 text-stone-50 flex flex-col items-center justify-center p-6" style={{ fontFamily: "Georgia,serif" }}>
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,700&display=swap');.display{font-family:'Fraunces',Georgia,serif}`}</style>
+        <div className="display text-2xl font-bold mb-1">Cat Cafe · Raspored</div>
+        {!pending ? (
+          <>
+            <div className="text-stone-400 text-sm mb-6">Tko si?</div>
+            <div className="w-full max-w-xs space-y-2 max-h-[70vh] overflow-y-auto">
+              {names.map((nm) => {
+                const isAdmin = ADMINS.includes(nm);
+                const set = !!pins[nm];
+                return (
+                  <button key={nm} onClick={() => selectName(nm)}
+                    className={`w-full py-2.5 rounded-xl flex items-center justify-between px-4 ${isAdmin ? "bg-amber-600 text-white font-semibold" : "bg-stone-700 text-stone-100"}`}>
+                    <span>{nm}{isAdmin ? " · admin" : ""}</span>
+                    <span className="text-[11px] opacity-70">{set ? "🔒" : "novi PIN"}</span>
+                  </button>
+                );
+              })}
+              <button onClick={() => selectName("__viewer")} className="w-full py-2.5 rounded-xl border border-stone-600 text-stone-300">Samo gledam (bez PIN-a)</button>
+            </div>
+          </>
+        ) : (
+          <div className="w-full max-w-xs">
+            <div className="text-center text-stone-300 mb-1">{pending}</div>
+            <div className="text-center text-stone-400 text-xs mb-4">{hasPin ? "Unesi svoj PIN" : "Postavi novi PIN (min. 4 znamenke)"}</div>
+            <input autoFocus type="password" inputMode="numeric" value={pinIn} onChange={(e) => { setPinIn(e.target.value); setPinErr(""); }}
+              placeholder="PIN" className="w-full text-center tracking-widest bg-stone-800 border border-stone-600 rounded-xl py-3 text-lg mb-2 focus:outline-none" />
+            {!hasPin && (
+              <input type="password" inputMode="numeric" value={pinIn2} onChange={(e) => { setPinIn2(e.target.value); setPinErr(""); }}
+                placeholder="ponovi PIN" className="w-full text-center tracking-widest bg-stone-800 border border-stone-600 rounded-xl py-3 text-lg mb-2 focus:outline-none" />
+            )}
+            {pinErr && <div className="text-red-400 text-xs text-center mb-2">{pinErr}</div>}
+            <button onClick={submitPin} className="w-full py-3 rounded-xl bg-amber-500 text-stone-900 font-bold mb-2">{hasPin ? "Ulaz" : "Spremi i uđi"}</button>
+            <button onClick={() => { setPending(null); setPinErr(""); }} className="w-full py-2 rounded-xl border border-stone-600 text-stone-400 text-sm">‹ natrag</button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const meLabel = me === "__viewer" ? "pregled" : me;
+  const TabBtn = ({ id, label }) => (
+    <button onClick={() => setTab(id)} className={`px-3 py-2 text-sm rounded-lg whitespace-nowrap ${tab === id ? "bg-stone-900 text-white" : "bg-stone-200 text-stone-600"}`}>{label}</button>
+  );
+
+  return (
+    <div className="min-h-screen bg-stone-50 text-stone-800" style={{ fontFamily: "Georgia,'Times New Roman',serif" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&display=swap');
+        .display{font-family:'Fraunces',Georgia,serif}
+        body{-webkit-tap-highlight-color:transparent}
+        .print-area{display:none}
+        @media print{.screen{display:none!important}.print-area{display:block!important;padding:16px;font-family:Georgia,serif;color:#000}
+          .pt{width:100%;border-collapse:collapse}.pt td,.pt th{border:1px solid #444;padding:6px 8px;font-size:12px;text-align:left;vertical-align:top}
+          .pt th{background:#eee}}
+      `}</style>
+
+      {/* ===== SCREEN ===== */}
+      <div className="screen">
+        {/* header */}
+        <div className="bg-stone-900 text-stone-50 px-4 py-3 sticky top-0 z-20 shadow-md">
+          <div className="flex items-center justify-between mb-2">
+            <div>
+              <div className="display text-xl font-bold leading-none">Cat Cafe · Raspored</div>
+              <div className="text-[11px] text-stone-400 mt-1">
+                {lastSync ? `osvježeno ${lastSync.toLocaleTimeString("hr-HR", { hour: "2-digit", minute: "2-digit" })}` : "…"}
+                {status && <span className="text-emerald-400 ml-2">{status}</span>}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={logout} className="text-[11px] bg-stone-700 active:bg-stone-600 px-2 py-2 rounded-lg">{meLabel} ▾</button>
+              <button onClick={() => loadAll(false)} className="text-xs bg-stone-700 active:bg-stone-600 px-3 py-2 rounded-lg">↻</button>
+            </div>
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            <TabBtn id="raspored" label="Raspored" /><TabBtn id="zamjene" label="Zamjene" />
+            <TabBtn id="godisnji" label="Godišnji" /><TabBtn id="tim" label="Tim" /><TabBtn id="upute" label="Upute" />
+          </div>
+        </div>
+
+        {!canEdit && tab !== "zamjene" && tab !== "upute" && (
+          <div className="bg-amber-50 border-b border-amber-200 text-amber-800 text-[12px] px-4 py-2">
+            Pregled — raspored uređuju Robert i Vedrana. Zamjene smjena možeš tražiti i potvrđivati sam.
+          </div>
+        )}
+
+        {loading ? <div className="p-8 text-center text-stone-400">učitavam…</div> :
+          tab === "raspored" ? (
+            <>
+              <div className="px-4 py-3 flex items-center justify-between bg-white border-b border-stone-200">
+                <button onClick={() => setWeekStart(addDays(weekStart, -7))} className="px-3 py-2 rounded-lg bg-stone-100 active:bg-stone-200">‹</button>
+                <div className="text-center">
+                  <div className="display font-bold text-sm">{shortHR(weekStart)} – {shortHR(addDays(weekStart, 6))}</div>
+                  <div className="text-[11px] text-stone-500">{isThisWeek ? "ovaj tjedan" : <button onClick={() => setWeekStart(mondayOf(new Date()))} className="text-sky-600 underline">→ ovaj tjedan</button>}</div>
+                </div>
+                <button onClick={() => setWeekStart(addDays(weekStart, 7))} className="px-3 py-2 rounded-lg bg-stone-100 active:bg-stone-200">›</button>
+              </div>
+              <div className="px-4 pt-3">
+                <button onClick={printWeek} className="w-full bg-stone-800 text-white py-2.5 rounded-xl text-sm font-semibold">🖨 Printaj ovaj tjedan</button>
+              </div>
+
+              <div className="px-3 py-3 space-y-3 pb-40">
+                {DAYS.map((d, i) => {
+                  const date = addDays(weekStart, i); const iso = key(date);
+                  const h = holidayFor(iso); const fer = isFerije(iso); const closed = h && h.closed;
+                  const showMiddle = WEEKEND_MIDDLE.includes(i) || (h && !h.closed) || fer;
+                  const shifts = SHIFTS.filter((s) => s.id !== "srednja" || showMiddle);
+                  return (
+                    <div key={i} className="bg-white rounded-2xl border border-stone-200 overflow-hidden shadow-sm">
+                      <div className="px-4 py-2 bg-stone-100 flex items-baseline justify-between"><span className="display font-bold">{DAYS_LONG[i]}</span><span className="text-xs text-stone-500">{shortHR(date)}</span></div>
+                      {(h || fer) && (
+                        <div className="px-4 py-1.5 flex flex-wrap gap-1.5 text-[11px]">
+                          {h && <span className={`px-2 py-0.5 rounded-full ${h.closed ? "bg-red-600 text-white" : "bg-emerald-600 text-white"}`}>★ {h.name}{h.closed ? " · ZATVORENO" : " · +50%"}</span>}
+                          {fer && <span className="px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">školske ferije</span>}
+                        </div>
+                      )}
+                      {closed ? <div className="px-4 py-4 text-center text-red-500 text-sm">Kafić zatvoren — neradni dan</div> : (
+                        <div className="divide-y divide-stone-100">
+                          {shifts.map((s) => {
+                            const cell = (
+                              <span className="flex items-start gap-3 px-4 py-3 w-full">
+                                <span className={`text-[11px] font-semibold px-2 py-1 rounded-md border whitespace-nowrap ${s.color}`}>{s.label}<br /><span className="font-normal">{s.time}</span></span>
+                                <span className="flex flex-wrap gap-1.5 pt-0.5 flex-1">
+                                  {week[i][s.id].length === 0 ? <span className="text-stone-300 text-sm">{canEdit ? "+ dodaj" : "—"}</span> :
+                                    week[i][s.id].map((pid) => { const lv = onLeave(pid, iso); return (
+                                      <span key={pid} className={`text-xs px-2 py-1 rounded-full ${lv ? "bg-amber-200 text-amber-900 line-through" : roleOf(pid) === "stalni" ? "bg-stone-800 text-white" : "bg-stone-200 text-stone-700"}`}>{nameOf(pid)}{lv ? " (G.O.)" : ""}</span>); })}
+                                </span>
+                              </span>
+                            );
+                            return canEdit
+                              ? <button key={s.id} onClick={() => setPicker({ day: i, shift: s.id, iso })} className="w-full text-left active:bg-stone-50">{cell}</button>
+                              : <div key={s.id}>{cell}</div>;
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                <div className="bg-white rounded-2xl border border-stone-200 p-4 shadow-sm">
+                  <div className="display font-bold mb-2">Pregled tjedna</div>
+                  {summary.some((p) => p.conflicts.length) && (
+                    <div className="mb-3 text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2">⚠ Večernja → jutarnja sljedeći dan:
+                      {summary.filter((p) => p.conflicts.length).map((p) => <div key={p.id}>• {p.name}: {p.conflicts.map((d) => `${DAYS[d]}→${DAYS[d + 1]}`).join(", ")}</div>)}
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                    {summary.filter((p) => p.count > 0).map((p) => <div key={p.id} className="flex justify-between"><span>{p.name}{p.holiday > 0 && <span className="text-emerald-600 text-[11px]"> +50%×{p.holiday}</span>}</span><span className="text-stone-500">{p.count} sm.</span></div>)}
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-2xl border border-stone-200 p-4 shadow-sm">
+                  <div className="display font-bold mb-2">Napomene (svi vide i pišu)</div>
+                  <textarea value={notes} onChange={(e) => setNotes(e.target.value)} onFocus={() => (notesFocused.current = true)} onBlur={() => { notesFocused.current = false; saveNotes(); }}
+                    placeholder="npr. Roko mijenja Enu u srijedu.." className="w-full h-28 text-sm border border-stone-200 rounded-lg p-2 focus:outline-none focus:border-stone-400 resize-none" style={{ fontFamily: "system-ui,sans-serif" }} />
+                  <button onClick={saveNotes} className="mt-2 text-xs bg-stone-800 text-white px-3 py-2 rounded-lg">Spremi napomene</button>
+                </div>
+              </div>
+            </>
+          ) : tab === "zamjene" ? (
+            <div className="px-3 py-3 space-y-3 pb-40">
+              <div className="bg-white rounded-2xl border border-stone-200 p-4 shadow-sm">
+                <div className="display font-bold mb-1">Nova zamjena</div>
+                <div className="text-[11px] text-stone-500 mb-3">Aktivira se čim druga strana potvrdi — bez admina.</div>
+                <label className="text-[11px] text-stone-400">Tko daje smjenu</label>
+                <select value={swapDraft.fromPerson || (me !== "__viewer" ? idOfName(me) : "")} onChange={(e) => setSwapDraft({ ...swapDraft, fromPerson: e.target.value })} className="w-full border border-stone-300 rounded-lg px-2 py-2 text-sm mb-2">
+                  <option value="">—</option>{roster.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+                <div className="flex gap-2 mb-2">
+                  <input type="date" value={swapDraft.fromDate || ""} onChange={(e) => setSwapDraft({ ...swapDraft, fromDate: e.target.value })} className="flex-1 border border-stone-300 rounded-lg px-2 py-2 text-sm" />
+                  <select value={swapDraft.fromShift || ""} onChange={(e) => setSwapDraft({ ...swapDraft, fromShift: e.target.value })} className="border border-stone-300 rounded-lg px-2 py-2 text-sm">
+                    <option value="">smjena</option>{SHIFTS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+                  </select>
+                </div>
+                <label className="text-[11px] text-stone-400">Tko preuzima</label>
+                <select value={swapDraft.toPerson || ""} onChange={(e) => setSwapDraft({ ...swapDraft, toPerson: e.target.value })} className="w-full border border-stone-300 rounded-lg px-2 py-2 text-sm mb-2">
+                  <option value="">—</option>{roster.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+                <label className="flex items-center gap-2 text-sm mb-2"><input type="checkbox" checked={!!swapDraft.mutual} onChange={(e) => setSwapDraft({ ...swapDraft, mutual: e.target.checked })} /> Uzajamna zamjena (i ja preuzimam njegovu)</label>
+                {swapDraft.mutual && (
+                  <div className="flex gap-2 mb-2">
+                    <input type="date" value={swapDraft.toDate || ""} onChange={(e) => setSwapDraft({ ...swapDraft, toDate: e.target.value })} className="flex-1 border border-stone-300 rounded-lg px-2 py-2 text-sm" />
+                    <select value={swapDraft.toShift || ""} onChange={(e) => setSwapDraft({ ...swapDraft, toShift: e.target.value })} className="border border-stone-300 rounded-lg px-2 py-2 text-sm">
+                      <option value="">smjena</option>{SHIFTS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+                    </select>
+                  </div>
+                )}
+                <button onClick={() => { if (!swapDraft.fromPerson && me !== "__viewer") swapDraft.fromPerson = idOfName(me); createSwap(); }} className="w-full bg-stone-800 text-white py-2.5 rounded-xl text-sm font-semibold">Pošalji zahtjev</button>
+              </div>
+
+              {swaps.length === 0 ? <div className="text-center text-stone-400 text-sm py-6">Nema zahtjeva.</div> :
+                swaps.map((sw) => {
+                  const badge = sw.status === "done" ? "bg-emerald-100 text-emerald-700" : sw.status === "rejected" ? "bg-stone-200 text-stone-500" : "bg-amber-100 text-amber-800";
+                  const txt = sw.status === "done" ? "potvrđeno ✓" : sw.status === "rejected" ? "odbijeno" : "čeka potvrdu";
+                  return (
+                    <div key={sw.id} className="bg-white rounded-2xl border border-stone-200 p-4 shadow-sm">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-semibold">{nameOf(sw.fromPerson)} → {nameOf(sw.toPerson)}</span>
+                        <span className={`text-[11px] px-2 py-0.5 rounded-full ${badge}`}>{txt}</span>
+                      </div>
+                      <div className="text-xs text-stone-600">
+                        Daje: {shortHR(parseIso(sw.fromDate))} {SHIFTS.find((s) => s.id === sw.fromShift)?.label}
+                        {sw.mutual && sw.toDate ? ` ⇄ ${shortHR(parseIso(sw.toDate))} ${SHIFTS.find((s) => s.id === sw.toShift)?.label}` : ""}
+                      </div>
+                      {sw.status === "pending" && (
+                        <div className="flex gap-2 mt-3">
+                          <button onClick={() => confirmSwap(sw.id)} className="flex-1 bg-emerald-600 text-white py-2 rounded-lg text-sm">Potvrđujem ({nameOf(sw.toPerson)})</button>
+                          <button onClick={() => rejectSwap(sw.id)} className="px-3 bg-stone-200 rounded-lg text-sm">Odbij</button>
+                        </div>
+                      )}
+                      {sw.status !== "pending" && <button onClick={() => deleteSwap(sw.id)} className="mt-2 text-[11px] text-stone-400">obriši</button>}
+                    </div>
+                  );
+                })}
+            </div>
+          ) : tab === "godisnji" ? (
+            <div className="px-3 py-3 space-y-3 pb-40">
+              <div className="text-xs text-stone-500 px-1">Stalni 20 radnih dana, učenici i vanjski 0. Brojač ne računa blagdane ni nedjelje.{!canEdit && " (uređuje admin)"}</div>
+              {roster.map((p) => {
+                const used = leaveUsed(p.id); const cap = roleDef(p.role).leave; const draft = leaveDraft[p.id] || {}; const over = cap != null && used > cap;
+                return (
+                  <div key={p.id} className="bg-white rounded-2xl border border-stone-200 p-4 shadow-sm">
+                    <div className="flex items-center justify-between mb-2"><span className="display font-bold">{p.name} <span className="text-[11px] text-stone-400 font-normal">· {roleDef(p.role).label}</span></span>
+                      {cap != null ? <span className={`text-sm font-bold ${over ? "text-red-600" : "text-stone-700"}`}>{used} / {cap}</span> : <span className="text-sm text-stone-500">{used} dana</span>}</div>
+                    {(leave[p.id] || []).length > 0 && (
+                      <div className="flex flex-wrap gap-1 mb-3 max-h-24 overflow-y-auto">
+                        {(leave[p.id] || []).map((iso) => <button key={iso} onClick={() => removeLeaveDate(p.id, iso)} className="text-[11px] px-2 py-1 rounded-full bg-amber-100 text-amber-900">{iso.slice(8, 10)}.{iso.slice(5, 7)}.{canEdit ? " ✕" : ""}</button>)}
+                      </div>
+                    )}
+                    {canEdit && (
+                      <div className="flex flex-wrap gap-2 items-center">
+                        <input type="date" value={draft.od || ""} onChange={(e) => setLeaveDraft({ ...leaveDraft, [p.id]: { ...draft, od: e.target.value } })} className="border border-stone-300 rounded-lg px-2 py-1.5 text-sm" />
+                        <span className="text-stone-400 text-sm">–</span>
+                        <input type="date" value={draft.do || ""} onChange={(e) => setLeaveDraft({ ...leaveDraft, [p.id]: { ...draft, do: e.target.value } })} className="border border-stone-300 rounded-lg px-2 py-1.5 text-sm" />
+                        <button onClick={() => addLeave(p.id)} className="bg-stone-800 text-white px-3 py-1.5 rounded-lg text-sm">+ dodaj</button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : tab === "tim" ? (
+            <div className="px-3 py-3 space-y-2 pb-40">
+              {roster.map((p) => {
+                const dte = daysTo(p.sanExpiry); const open = expanded === p.id;
+                const sanBadge = p.sanExpiry == null || p.sanExpiry === "" ? null : dte < 0 ? ["ISTEKLA", "bg-red-600 text-white"] : dte <= 30 ? [`za ${dte} d`, "bg-amber-500 text-white"] : ["vrijedi", "bg-emerald-100 text-emerald-700"];
+                return (
+                  <div key={p.id} className="bg-white border border-stone-200 rounded-xl shadow-sm">
+                    <button onClick={() => setExpanded(open ? null : p.id)} className="w-full flex items-center justify-between px-4 py-3">
+                      <span className="text-sm">{p.name} <span className="text-[11px] text-stone-400">· {roleDef(p.role).label}</span></span>
+                      <span className="flex items-center gap-2">{sanBadge && <span className={`text-[10px] px-2 py-0.5 rounded-full ${sanBadge[1]}`}>San. {sanBadge[0]}</span>}<span className="text-stone-400">{open ? "▾" : "›"}</span></span>
+                    </button>
+                    {open && (
+                      <div className="px-4 pb-4 space-y-2" style={{ fontFamily: "system-ui,sans-serif" }}>
+                        <Field label="Kontakt broj" type="tel" value={p.phone} onSave={(v) => updateMember(p.id, "phone", v)} disabled={!canEdit} />
+                        <Field label="Email" type="email" value={p.email} onSave={(v) => updateMember(p.id, "email", v)} disabled={!canEdit} />
+                        <div className="flex gap-2">
+                          <div className="flex-1"><Field label="Sanitarna — izdana" type="date" value={p.sanIssued} onSave={(v) => updateMember(p.id, "sanIssued", v)} disabled={!canEdit} /></div>
+                          <div className="flex-1"><Field label="Vrijedi do" type="date" value={p.sanExpiry} onSave={(v) => updateMember(p.id, "sanExpiry", v)} disabled={!canEdit} /></div>
+                        </div>
+                        {canEdit && (
+                          <div className="flex justify-between items-center pt-1">
+                            <select value={p.role} onChange={(e) => updateMember(p.id, "role", e.target.value)} className="border border-stone-300 rounded-lg px-2 py-1.5 text-sm">{ROLES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}</select>
+                            <div className="flex items-center gap-3">
+                              <button onClick={() => resetMemberPin(p.name)} className="text-xs text-sky-600">{pins[p.name] ? "resetiraj PIN" : "nema PIN-a"}</button>
+                              <button onClick={() => removePerson(p.id)} className="text-xs text-red-500">ukloni</button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {canEdit && (
+                <div className="flex gap-2 items-center pt-2">
+                  <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="novo ime" className="flex-1 border border-stone-300 rounded-lg px-3 py-2 text-sm" style={{ fontFamily: "system-ui,sans-serif" }} />
+                  <select value={newRole} onChange={(e) => setNewRole(e.target.value)} className="border border-stone-300 rounded-lg px-2 py-2 text-sm">{ROLES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}</select>
+                  <button onClick={addPerson} className="bg-stone-800 text-white px-3 py-2 rounded-lg text-sm">+</button>
+                </div>
+              )}
+            </div>
+          ) : (
+            // UPUTE
+            <div className="px-4 py-4 space-y-4 pb-40 text-sm leading-relaxed">
+              <Section title="PIN">Svatko ima svoj PIN. Prvi put kad odabereš svoje ime, postaviš PIN (min. 4 znamenke); idući put ga upisuješ za ulaz. Tako se prijava i potvrda zamjena vežu na stvarnu osobu. Ako netko zaboravi PIN, Robert ili Vedrana ga resetiraju u tabu Tim (osoba postavi novi pri sljedećem ulazu). Napomena: PIN je interna brava za tim, ne i jaka lozinka.</Section>
+              <Section title="Admini">Raspored, godišnji i članove tima uređuju <b>Robert</b> i <b>Vedrana</b>. Ostali vide raspored i mogu pisati napomene te tražiti/potvrđivati zamjene.</Section>
+              <Section title="Kako se koristi">
+                <b>Raspored</b> — listaj tjedne strelicama. Admin tapne smjenu i odabere ljude. Tipka <b>🖨 Printaj</b> ispisuje tjedan.<br />
+                <b>Zamjene</b> — bilo tko zatraži zamjenu (tko daje, koji dan/smjena, tko preuzima). Čim druga strana tapne <b>Potvrđujem</b>, raspored se sam mijenja — bez admina.<br />
+                <b>Godišnji</b> — 20 radnih dana po stalnom; admin dodaje raspon datuma. Tko je na G.O. prikazan je precrtano.<br />
+                <b>Tim</b> — kontakt, email i sanitarna knjižica (izdana / vrijedi do). App upozorava kad sanitarna ističe (≤30 dana) ili je istekla.
+              </Section>
+              <Section title="Pravila">
+                Nema večernje (15–23) pa ujutro (08–15) sljedeći dan — app upozorava.<br />
+                Srednja smjena (13–21) samo petkom, vikendom, blagdanima i za vrijeme školskih ferija.<br />
+                Blagdani nose +50%. <b>Uskrs (5.4.)</b> i <b>Božić (25.12.)</b> = zatvoreno.
+              </Section>
+              <Section title="Sinkronizacija">Podaci su dijeljeni — svi vide isto. App se sam osvježava svakih 12 s, ili tapni ↻.</Section>
+            </div>
+          )}
+      </div>
+
+      {/* ===== PRINT AREA ===== */}
+      <div className="print-area">
+        <h2 style={{ margin: "0 0 2px" }}>Cat Cafe Zagreb — Tjedni raspored</h2>
+        <div style={{ fontSize: 13, marginBottom: 10 }}>{shortHR(weekStart)} – {shortHR(addDays(weekStart, 6))} 2026</div>
+        <table className="pt">
+          <thead><tr><th>Dan</th><th>Jutarnja 08–15</th><th>Srednja 13–21</th><th>Večernja 15–23</th></tr></thead>
+          <tbody>
+            {DAYS.map((d, i) => {
+              const iso = key(addDays(weekStart, i)); const h = holidayFor(iso);
+              if (h && h.closed) return <tr key={i}><td>{DAYS_LONG[i]} {shortHR(addDays(weekStart, i))}</td><td colSpan={3} style={{ textAlign: "center" }}>ZATVORENO — {h.name}</td></tr>;
+              const cell = (sid) => week[i][sid].map((pid) => nameOf(pid) + (onLeave(pid, iso) ? " (G.O.)" : "")).join(", ");
+              return <tr key={i}><td>{DAYS_LONG[i]} {shortHR(addDays(weekStart, i))}{h ? ` ★+50%` : ""}</td><td>{cell("jutarnja")}</td><td>{cell("srednja")}</td><td>{cell("vecernja")}</td></tr>;
+            })}
+          </tbody>
+        </table>
+        {notes && <div style={{ marginTop: 12, fontSize: 12 }}><b>Napomene:</b> {notes}</div>}
+      </div>
+
+      {/* picker */}
+      {picker && (
+        <div className="fixed inset-0 z-30 flex items-end" onClick={() => setPicker(null)}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div className="relative w-full bg-white rounded-t-3xl max-h-[75vh] overflow-y-auto p-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3"><div className="display font-bold">{DAYS_LONG[picker.day]} · {SHIFTS.find((s) => s.id === picker.shift).label} {SHIFTS.find((s) => s.id === picker.shift).time}</div><button onClick={() => setPicker(null)} className="text-stone-400 text-xl px-2">✕</button></div>
+            {ROLES.map((role) => {
+              const members = roster.filter((r) => r.role === role.id);
+              if (members.length === 0) return null;
+              return (
+              <div key={role.id} className="mb-3"><div className="text-[11px] uppercase tracking-wide text-stone-400 mb-1">{role.plural}</div>
+                <div className="flex flex-wrap gap-2">
+                  {members.map((p) => { const on = week[picker.day][picker.shift].includes(p.id); const lv = onLeave(p.id, picker.iso);
+                    return <button key={p.id} onClick={() => togglePerson(picker.day, picker.shift, p.id)} className={`px-3 py-2 rounded-full text-sm border ${on ? "bg-stone-800 text-white border-stone-800" : lv ? "bg-amber-50 text-amber-700 border-amber-300" : "bg-white text-stone-700 border-stone-300"}`}>{on ? "✓ " : ""}{p.name}{lv ? " (G.O.)" : ""}</button>; })}
+                </div>
+              </div>
+            ); })}
+            <button onClick={() => setPicker(null)} className="w-full mt-2 bg-stone-100 py-3 rounded-xl text-sm font-semibold">Gotovo</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Field({ label, value, onSave, type, disabled }) {
+  const [v, setV] = useState(value || "");
+  useEffect(() => { setV(value || ""); }, [value]);
+  return (
+    <div>
+      <label className="text-[11px] text-stone-400">{label}</label>
+      <input type={type || "text"} value={v} disabled={disabled} onChange={(e) => setV(e.target.value)} onBlur={() => v !== (value || "") && onSave(v)}
+        className="w-full border border-stone-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none disabled:bg-stone-50 disabled:text-stone-500" />
+    </div>
+  );
+}
+function Section({ title, children }) {
+  return <div className="bg-white rounded-2xl border border-stone-200 p-4 shadow-sm"><div className="display font-bold mb-1">{title}</div><div className="text-stone-700">{children}</div></div>;
+}
+
+
+// ---------- setup + bootstrap ----------
+function Setup({ onReady }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [link, setLink] = useState("");
+  async function make() {
+    setBusy(true); setErr("");
+    try {
+      const res = await createStore({ roster: JSON.stringify(DEFAULT_ROSTER) });
+      if (!res) throw new Error("noid");
+      const url = location.origin + location.pathname + "?b=" + res.id + "&p=" + res.p;
+      history.replaceState(null, "", url);
+      setLink(url);
+    } catch (e) { setErr("Ni jedna baza ne prolazi s ovog hosta. Pokušaj još jednom za par sekundi; ako i dalje ne ide, javi mi."); }
+    setBusy(false);
+  }
+  return (
+    <div className="min-h-screen bg-stone-900 text-stone-50 flex flex-col items-center justify-center p-6" style={{ fontFamily: "Georgia,serif" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,700&display=swap');.display{font-family:'Fraunces',Georgia,serif}`}</style>
+      <div className="display text-2xl font-bold mb-1">Cat Cafe · Raspored</div>
+      {!link ? (
+        <>
+          <div className="text-stone-400 text-sm mb-6 text-center max-w-xs">Prvi put: kreiraj timski raspored. Dobit ćeš jedan link koji dijeliš svima.</div>
+          <button onClick={make} disabled={busy} className="px-6 py-3 rounded-xl bg-amber-500 text-stone-900 font-bold disabled:opacity-50">{busy ? "kreiram…" : "Kreiraj timski raspored"}</button>
+          {err && <div className="text-red-400 text-xs mt-3 text-center max-w-xs">{err}</div>}
+        </>
+      ) : (
+        <div className="w-full max-w-xs text-center">
+          <div className="text-emerald-400 text-sm mb-2">Spremno ✓</div>
+          <div className="text-stone-400 text-xs mb-2">Ovo je vaš zajednički link — pošalji ga timu. Svi ga otvaraju i dijele iste podatke:</div>
+          <div className="bg-stone-800 border border-stone-600 rounded-lg p-2 text-[11px] break-all mb-2">{link}</div>
+          <button onClick={() => { navigator.clipboard && navigator.clipboard.writeText(link); }} className="w-full py-2 rounded-xl bg-stone-700 text-stone-100 text-sm mb-2">Kopiraj link</button>
+          <button onClick={onReady} className="w-full py-3 rounded-xl bg-amber-500 text-stone-900 font-bold">Otvori raspored</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Root() {
+  const [phase, setPhase] = useState(BLOB_ID ? "app" : "setup");
+  if (phase === "setup") return <Setup onReady={() => setPhase("app")} />;
+  return <App />;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<Root />);
+
+</script>
+</body>
+</html>
