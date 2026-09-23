@@ -118,10 +118,11 @@ const FERIJE = [
 ];
 
 const DEFAULT_ROSTER = [
-  ["Vedrana", "stalni"], ["Jana", "stalni"], ["Inoslav", "stalni"], ["Patricija", "stalni"],
-  ["Terra", "stalni"], ["Ivan", "stalni"], ["Agneza", "stalni"],
-  ["Nives", "student"], ["Ena", "student"], ["Jelena", "student"], ["Roko", "student"], ["Lucija", "student"],
+  ["Vedrana", "stalni"], ["Inoslav", "stalni"], ["Terra", "stalni"],
+  ["Nives", "student"],
 ].map(([name, role], i) => ({ id: "p" + i, name, role, phone: "", email: "", sanIssued: "", sanExpiry: "" }));
+// stari tim koji je aplikacija prije stavljala sama; takav spremljeni tim zamijeni novim
+const OLD_DEFAULT_NAMES = "Vedrana,Jana,Inoslav,Patricija,Terra,Ivan,Agneza,Nives,Ena,Jelena,Roko,Lucija";
 
 // ---------- date helpers (local time) ----------
 function key(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
@@ -173,7 +174,7 @@ function App() {
     await refreshDB();
     const [r, w, n, l, s, pin] = await Promise.all([sGet("roster"), sGet(`week:${weekKey}`), sGet(`notes:${weekKey}`), sGet("leave"), sGet("swaps"), sGet("pins")]);
     if (pin) { try { setPins(JSON.parse(pin)); } catch {} }
-    if (r) { try { setRoster(JSON.parse(r)); } catch {} } else if (!silent) await sSet("roster", JSON.stringify(DEFAULT_ROSTER));
+    if (r) { try { const pr = JSON.parse(r); if (pr.map((x) => x.name).join(",") === OLD_DEFAULT_NAMES) { setRoster(DEFAULT_ROSTER); await sSet("roster", JSON.stringify(DEFAULT_ROSTER)); } else setRoster(pr); } catch {} } else if (!silent) await sSet("roster", JSON.stringify(DEFAULT_ROSTER));
     setWeek(w ? safeWeek(w) : emptyWeek());
     if (!notesFocused.current) setNotes(n || "");
     if (l) { try { setLeave(JSON.parse(l)); } catch {} }
